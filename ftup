@@ -1,0 +1,502 @@
+#!/bin/sh
+export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/home/root:
+USERAGENT="Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/109.0"
+alias yget="/usr/bin/wget -T 15 -U \"$USERAGENT\" --header \"Cache-Control: no-cache\""
+#. nvram_ops #for future use
+NG() { nvram get "$1" ; }
+trap ctrl_c SIGINT
+
+# FreshTomato Upgrade Script -- HommeOursPorc 2024/04
+ver="v0.38"
+
+help() {
+echo -e "FreshTomato Upgrade Script $ver
+
+Usage: ftup [options] [firmware path or URL]
+
+Default is dirty upgrade (NVRAM untouched) unless '-c' or '-r' is specified.
+
+Single option:
+  --changelog      Print latest FreshTomato changelog.
+  --check          Print latest FreshTomato version number.
+  --erase-nvram    Erase all data in NVRAM memory (thorough).
+  --id             Identify device.
+
+Options:
+  -c               Clean upgrade (no settings restoration).
+  -d <path>        Overrides default download directory (/tmp/t64upwd/).
+  -f               Force 'unzip on the fly' download mode.
+  -n               Use wget '--no-check-certificate'
+                   (you can try this if wget fail to download the firmware).
+  -o               Only download firmware (no installation).
+  -r               Restore settings after upgrade (implies '-c'),
+                   PlainText Backup script by @rs232 is required
+                   which is available on the 'linksysinfo.org' forum.
+  -y               Automatic 'YES' to prompts. USE WITH CAUTION!
+  -z               Force zip download in tmpfs (when saving in RAM,
+                   the trx file is extracted \"on the fly\". This
+                   is for devices with low RAM that can't hold
+                   both the zip and trx files in RAM simultaneously).
+
+Infos:
+ - Single option are meant to be run without any other arguments.
+ - URL must begin with \"http(s)://\".
+ - Supported format is zip, trx, bin and chk.
+
+WARNING:
+   This script comes with no guarantee.
+   This script, especially with option '-y', could be dangerous!
+   Make sure you are using the right firmware before proceeding!
+   
+I'm NOT responsible for any bricked devices. Use at your own risks.
+   
+USE WITH CAUTION!\n"
+}
+
+error() {
+# $1 = ERROR No
+e=3
+m="" # message
+case $1 in
+1)  m="Unknown argument.";;
+2)  m="Too many arguments.";;
+3)  m="Firmware path or URL is missing.";;
+4)  m="No USB device found. Settings restoration is not possible.";;
+5)  m="nvram_backup is missing. Settings restoration is not possible.";;
+6)  m="Firmware format not supported.";;
+7)  m="Out of memory, not enough RAM.";;
+8)  m="Unable to download firmware.";;
+9)  m="Firmware doesn't exist or file is empty.";;
+10) m="ZIP archive is corrupted.";;
+11) m="Can't unzip archive, it's either corrupted or not enough RAM.";;
+12) m="ZIP archive countain zero or more than one firmware.";;
+13) m="Upgrading firmware with JFFS enabled is not possible.";;
+14) m="Backup is missing. Settings restoration is not possible.";;
+15) e=5; m="Operation cancelled.";;
+16) m="Can't fetch newest version number from freshtomato.org.";;
+17) m="Destination directory doesn't exist.";;
+18) m="Can't download zip file if source is not a zip file.";;
+19) m="Can't download zip file if there's no file to download.";;
+20) m="MD5 sum didn't match source MD5.";;
+21) m="Firmware URL is missing.";;
+22) m="Firmware informations doesn't match the router informations. Make sure you are using the right firmware for your device or try to upgrade without option '-y'.";;
+esac
+ilog $e "$m"
+kill $(jobs -p) &>/dev/null
+rm -f ${WORKDIR}/*
+exit $1
+}
+
+ilog() {
+# $1 = logger Priority (logger -p)
+# $2 = message to log
+case $1 in
+    7) e="DEBUG" ;;
+    6) e="INFO" ;;
+    5) e="NOTICE" ;;
+    4) e="WARNING" ;;
+    3) e="ERROR" ;;
+esac
+logger -p $1 -t $(basename "$0")[$$] "$2"
+[ $1 -le 4 ] && echo "$e: $2" || echo "$2"
+}
+
+ctrl_c() {
+kill $(jobs -p) &>/dev/null
+echo; error 15
+}
+
+wait_loop() {
+# $1 = wait time in seconds
+# $2 = msg to print
+c=$1
+while [ $c -gt 0 ]; do
+echo -ne "$2 $c\033[0K\r"
+sleep 1
+: $((c--))
+done
+}
+
+id() {
+echo "$FULLMODEL" | grep -qi "Cisco Linksys" && MAKE="Linksys" || MAKE="$(echo "$FULLMODEL" | awk '{print $1}')"
+TMODEL="$(echo "$FULLMODEL" | awk '{if(NF>=3){{print $(NF-1)"_"$NF}}else{{print $NF}}}' | tr -d "/")"
+FIX="$(NG t_fix1)"
+ID="$(NG odmpid)"
+[ "$FIX" == "$TMODEL" ] && MODEL="$FIX" || { [ "$ID" != "" ] && MODEL="$ID" || MODEL="$FIX" ; }
+SDK="$(echo "$OSVER" | awk '{ for(i=1; i<=NF; i++) { if(match($i, /^K+/)) { print $i; break; } } }')" # eg K26ARM
+VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
+[ "$CPU" == "mips" ] && {
+    SDK="$(echo "$SDK" | cut -d "_" -f2)"
+    NVRAM="$(nvram show | grep "entries,.*bytes" | awk '{print ($3+$6)/1024}')K"
+} || {
+    NVRAM="$(nvram show 2>&1 >/dev/null | tr -d "()" | awk '{print ($2+$4)/1024}')K"
+}
+}
+
+id_show() {
+id
+case "$SDK" in
+    RTAC) SDK="K26RT-AC";;
+    RTN ) SDK="K26RT-N";;
+    RT  ) SDK="K26";;
+esac
+echo "
+FreshTomato $OSVER
+on $FULLMODEL
+
+----   Router infos  ----
+       MAKE = $MAKE
+      MODEL = $MODEL
+        CPU = $(echo $CPU | awk '{print toupper($0)}')
+        SDK = $SDK
+      NVRAM = $NVRAM
+  Variation = $VAR
+ FT Version = $CURVER
+----  /Router infos  ----
+
+Please report any incorrect results at
+https://www.linksysinfo.org/index.php?threads/freshtomato-upgrade-script-v0-11.78326/
+"
+}
+
+changelog() {
+BITBUCKET="https://bitbucket.org/pedro311/freshtomato"
+COMMIT="$(yget -q --no-check-certificate -O- ${BITBUCKET}-${CPU}/src/${CPU}-master/CHANGELOG | grep -Eo 'commit/.*"}' | sed "s/\".*//;s/commit\///")"
+CLURL="${BITBUCKET}-${CPU}/raw/${COMMIT}/CHANGELOG"
+echo -e "YOUR VERSION = $CURVER\nTO QUIT PRESS 'Q'\n\n$(yget -q --no-check-certificate -O- "$CLURL")" | less
+}
+
+check_update() {
+LATESTVER="$(yget -q --no-check-certificate -O- "http://freshtomato.org/version.txt")"
+[ "$LATESTVER" == "" ] && error 16
+echo "Current version = $CURVER
+Latest  version = $LATESTVER"
+[ $(echo $LATESTVER | tr -d ".") -gt $(echo $CURVER | tr -d ".") ] && echo -e "UPDATE AVAILABLE!"
+}
+
+enough_memory() {
+# $1 = FWSIZE
+# enoughmem=0 --> no  (not enough)
+# enoughmem=1 --> yes (proceed)
+TOTALMEM=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+USEDMEM=$(free | awk 'NR==2 {print $3}')
+FREEMEM=$((${TOTALMEM}-${USEDMEM}))
+[ $1 -ge $FREEMEM ] && echo 0 || echo 1
+}
+
+download() {
+[ "$DLDIR" != "" ] && DESTDIR="$DLDIR" || DESTDIR="$WORKDIR"
+[ "$(df -P "$DESTDIR" | tail -n1 | awk '{print $1}')" == "tmpfs" ] && TMPFS=1
+yget -qS --spider $NOCHECK "$FWURL" 2>"${WORKDIR}/yget.out"
+[ $? -eq 0 -a $(grep -ci "content-length" "${WORKDIR}/yget.out") -eq 1 ] && FWSIZE=$(((($(awk 'tolower($0) ~ /content-length/ {print $2}' "${WORKDIR}/yget.out")/1024)*5)/2))
+rm -f "${WORKDIR}/yget.out"
+[ $ISZIP -eq 1 -a $TMPFS -eq 1 -a $FORCEZIP -eq 0 -a $FORCEFLY -eq 0 -a $FWSIZE -gt 0 ] && [ $(enough_memory $FWSIZE) -eq 1 ] && FORCEZIP=1
+{
+c=0; until [ "$(pidof wget)" ];do c=$((c+1)); [ $c -le 21 ] && usleep 500000 || break ; done ; c=0
+while [ "$(pidof wget)" ]; do
+    c=$((c+1))
+    sleep 1
+    [ "$CPU" == "mips" -a $c -gt 1 ] && printf "Downloading... %02d:%02d:%02d\r" $((c/3600)) $(((c%3600)/60)) $((c%60))
+done
+printf "\rDownloaded in  %02d:%02d:%02d\n" $((c/3600)) $(((c%3600)/60)) $((c%60))
+} &
+[ $ISZIP -eq 1 -a $TMPFS -eq 1 -a $FORCEZIP -eq 0 ] || [ $FORCEFLY -eq 1 ] && {
+    rm -f "${WORKDIR}/pipe1" "${WORKDIR}/pipe2" ; mkfifo "${WORKDIR}/pipe1" "${WORKDIR}/pipe2"
+    md5sum "${WORKDIR}/pipe1" > "${WORKDIR}/${filename}.md5" &
+    unzip -l "${WORKDIR}/pipe2" > "${WORKDIR}/zip.list" &
+    yget $NOCHECK -O- "$FWURL" | tee "${WORKDIR}/pipe1" | tee "${WORKDIR}/pipe2" | unzip -o - "*.trx" "*.bin" "*.chk" -d "$DESTDIR" || error 8
+    wait $(pidof wget) $(pidof unzip)
+    [ $(grep -Ec "\.trx|\.bin|\.chk" "${WORKDIR}/zip.list") -eq 1 ] && fwname="$(awk '/\.trx|\.bin|\.chk/ {print $4}' "${WORKDIR}/zip.list")" || error 12
+    DESTMD5SUM="$(awk '{print $1}' "${WORKDIR}/${filename}.md5")"
+    ISZIP=0
+    rm -f "${WORKDIR}/pipe1"  "${WORKDIR}/pipe2" "${WORKDIR}/${filename}.md5" "${WORKDIR}/zip.list"
+    FWPATH="${DESTDIR}/$fwname"                                 
+} || {
+    FWPATH="${DESTDIR}/$filename"
+    yget $NOCHECK -O "$FWPATH" "$FWURL" || error 8
+    [ $OFFICIAL -eq 1 -a -s "$FWPATH" ] && DESTMD5SUM="$(md5sum "$FWPATH" | awk '{print $1}')"
+}
+sleep 1
+[ ! -s "$FWPATH" ] && error 9
+[ $OFFICIAL -eq 1 ] && {
+    echo "Verifying MD5 SUM..."
+    md5path="${FWURL%/*}/MD5SUM"
+    SRCMD5SUM="$(yget -q $NOCHECK -O- "$md5path" | grep "$filename" | awk '{print $1}')"
+    ERROR=0
+    [ "$SRCMD5SUM" != "" ] && {
+        echo "$SRCMD5SUM" > "${DESTDIR}/${filename}.md5"
+        echo "Source   MD5 sum = $SRCMD5SUM"
+        echo "Firmware MD5 sum = $DESTMD5SUM"
+        [ "$SRCMD5SUM" == "$DESTMD5SUM" ] && echo -e "MD5 Match!\n" || ERROR=1
+    } || {
+        ERROR=1
+    }
+    [ $ERROR -eq 1 ] && {
+        ilog 3 "Impossible to verify downloaded firmware file integrity!"
+        [ $AUTOYES -eq 1 ] && { rm -f "$FWPATH" "${DESTDIR}/${filename}.md5" ; error 20 ; }
+        printf "Continue anyway? $MSG"
+        read ANSWER ; echo
+        [ "$ANSWER" != "yes" ] && { rm -f "$FWPATH" "${DESTDIR}/${filename}.md5" ; error 15 ; }
+    }
+}
+[ $ONLY -eq 1 ] && printf "Download completed.\n\n"
+}
+
+prep_file() {
+[ "$FWPATH" == "" ] && {
+    FWPATH="$FWURL"
+    [ "$(df -P "$FWPATH" | tail -n1 | awk '{print $1}')" == "tmpfs" ] && TMPFS=1
+}
+[ $TMPFS -eq 0 -a $ISZIP -eq 0 ] && {
+    cp -f "$FWPATH" "$WORKDIR" || error 7
+    FWPATH="${WORKDIR}/${filename}"
+}
+[ $ISZIP -eq 1 ] && {
+    unzip -t "$FWPATH" || error 10
+    [ $(unzip -l "$FWPATH" | grep -Ec "\.trx|\.bin|\.chk") -eq 1 ] && fwname="$(unzip -l "$FWPATH" | grep -E "\.trx|\.bin|\.chk" | awk '{print $4}')" || error 12
+    FWSIZE=$(($(unzip -l "$FWPATH" | grep -E "\.trx|\.bin|\.chk" | awk '{print $1}')/1024))
+    [ $TMPFS -eq 1 ] && FWSIZE=$((${FWSIZE}+$(du "$FWPATH" | awk '{print $1}')))
+    [ $(enough_memory $FWSIZE) -eq 0 ] && error 7
+    unzip -o "$FWPATH" "$fwname" -d "$WORKDIR" || error 11
+    [ $TMPFS -eq 1 ] && rm -f "$FWPATH"
+    FWPATH="${WORKDIR}/$fwname"
+    [ ! -s "$FWPATH" ] && error 9
+}
+
+# check if right firmware if possible
+id
+WARN=""
+fwname="$(basename "$FWPATH")"
+[ "$CPU" == "arm" -a "$MODEL" != "R1D" ] && {
+    [ "$(tail -n1 "$FWPATH" | strings | tail -n1)" != "$MODEL" ] && WARN="WARNING: Model name $MODEL NOT found inside the firmware file footer.\n"
+}
+[ $(echo "$fwname" | grep -c "$SDK") -ne 1 ] && WARN="${WARN}WARNING: Router SDK (${SDK}) doesn't match the one stated in the firmware name.\n"
+nvsize="$(echo "$fwname" | grep -Eo "(|[1-9])[1-9][1-9]K")"
+[ "$nvsize" != "$NVRAM" ] && WARN="${WARN}WARNING: NVRAM size (${NVRAM}) doesn't match with the size stated in the firmware name (${nvsize}).\n"
+# check for mips r1 vs r2 ???
+[ "$WARN" != "" ] && {
+    printf "\n$WARN"
+    [ $AUTOYES -eq 1 ] && error 22
+    ilog 4 "Some information doesn't match, make sure you are using the right firmware before proceeding!!"
+    printf "\nContinue anyway? $MSG"
+    read ANSWER ; echo
+    [ "$ANSWER" != "yes" ] && error 15
+}
+}
+
+restore() {
+printf "Creating backup..."
+$NVBACKUP usbrestore all
+[ -s "$AUTORUN" ] && printf " Done\n" || error 14
+ilog 5 "Backup created successfully: $AUTORUN"
+}
+
+prepare_upgrade() {
+# Prepare firmware flashing
+sync
+c=10; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "Please wait... $c\033[0K\r";sleep 1;done
+nvram set action_service="upgrade-start"
+sleep 2
+kill -s SIGUSR1 1
+c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "Stopping services... $c\033[0K\r";sleep 1;done; printf "Stopping services... Done\n"
+}
+
+upgrade() {
+# Write firmware file
+ilog 6 "Writing firmware $filename"
+[ -e "${WORKDIR}/ftup.out" ] && rm -f ${WORKDIR}/ftup.out
+[ "$CPU" == "arm" ] && {
+    nohup mtd-write2 ${FWPATH} linux > ${WORKDIR}/ftup.out 2>/dev/null &
+    MTD="mtd-write2"
+} || {
+    nohup mtd-write -w -i ${FWPATH} -d linux > ${WORKDIR}/ftup.out 2>/dev/null &
+    MTD="mtd-write"
+}
+c=0; until [ "$(pidof "$MTD")" ];do c=$((c+1)); [ $c -le 21 ] && { echo -ne "Please wait... $c\033[0K\r"; usleep 500000; } || break ; done
+c=0; while [ "$(pidof "$MTD")" ];do c=$((c+1)); echo -ne "Writing firmware... $c\033[0K\r";sleep 1;done; printf "Writing firmware... Done\n"
+sleep 2
+
+# Check if flash successful
+[ ! -s "${WORKDIR}/ftup.out" ] && {
+    ilog 3 "Writing of ${filename} unsuccessful!!"
+    FAIL=1
+    [ $RESTORE -eq 1 ] && {
+        NOMORE="restore.$(date '+%Y%m%d_%H%M%S')"
+        mv -f "$AUTORUN" "$(dirname "$AUTORUN")/$NOMORE"
+        ilog 6 "Auto settings restoration cancelled, restore.autorun was renamed $NOMORE"
+    }
+    echo -e "\nSomething went wrong. The router is NOT upgraded. The router will reboot.\n"
+    echo -e "To cancel the reboot and retry the upgrade manually press 'Ctrl+C'\n"
+    wait_loop 10 "Rebooting in"
+    rboot
+}
+cat ${WORKDIR}/ftup.out | sort -u; rm -f ${WORKDIR}/ftup.out
+ilog 6 "Successfully flashed $filename"
+}
+
+erase_nvram() {
+ilog 6 "Erasing nvram"
+[ "$CPU" == "arm" ] && mtd-erase2 nvram || mtd-erase -d nvram
+sleep 2
+}
+
+rboot() {
+[ $RESTORE -eq 1 -a $FAIL -eq 0 ] && ilog 6 "Your router will reboot twice to restore its settings. Please be patient."
+sync
+/sbin/reboot && kill -9 $PPID
+exit
+}
+
+testvar () {
+echo
+for i in OPTIONS MODE FAIL REMOTE OFFICIAL FORCEZIP DLDIR SETDIR FORCEFLY NOCHECK ONLY ERASE AUTOYES RESTORE NVBACKUP AUTORUN FWPATH FWURL FWSIZE filename extension ISZIP TMPFS CPU fwname MODEL SDK NVRAM; do
+    var="$(eval echo \$$i)"
+    [ "$var" != 0 -a "$var" != "" ] && echo "$i = $var"
+done
+echo
+exit 99
+}
+
+
+# Global Variables
+WORKDIR="/tmp/ftupwd"
+MSG="To continue type [yes], to cancel type [n]: "
+OPTIONS=""
+MODE=""
+FAIL=0
+REMOTE=0
+OFFICIAL=0
+FORCEZIP=0
+FORCEFLY=0
+DLDIR=""
+SETDIR=0
+NOCHECK=""
+ONLY=0
+ERASE=0
+AUTOYES=0
+RESTORE=0
+NVBACKUP=""
+AUTORUN=""
+FWPATH=""
+FWURL=""
+FWSIZE=0
+filename=""
+extension=""
+fwname=""
+ISZIP=0
+TMPFS=0
+[ "$(uname -m)" == "mips" ] && CPU="mips" || CPU="arm"
+OSVER="$(NG os_version)"
+CURVER="$(echo "$OSVER" | awk '{print $1}')" # eg 2023.3
+FULLMODEL="$(NG t_model_name)"
+MAKE=""
+MODEL=""
+SDK=""
+VAR=""
+NVRAM=""
+
+
+# Check and set arguments
+[ $# -eq 0 ] && { help; exit 0; }
+[ $# -eq 1 ] && { [ "$1" == "help" -o "$1" == "-h" -o "$1" == "--help" ] && { help; exit 0; } }
+[ $# -eq 1 ] && { [ "$(echo "$1" | cut -c-2)" == "--" ] && {
+    GOTO=0
+    case $1 in
+        --changelog)    changelog ;;
+        --check)        check_update ;;
+        --erase-nvram)  ERASE=1 ; GOTO=1 ;;
+        --id)           id_show ;;
+        *)              GOTO=1 ;;
+    esac
+    [ $GOTO -eq 0 ] && exit 0
+    }
+}
+for a in "$@"; do
+    [ $ERASE -eq 1 ] && break
+    [ "$(echo "$a" | cut -c1)" == "-" ] && {
+        a="$(echo "$a" | tr -d "-")"
+        [ "$a" == "" ] && error 1
+        OPTIONS="$(echo "$a" | grep -o . )"
+        for o in $OPTIONS; do
+            case $o in
+                c) [ "$MODE"     == "" ] && MODE="clean" || error 2 ;;
+                d) [ "$DLDIR"    == "" ] && SETDIR=1     || error 2 ;;
+                f) [ $FORCEFLY   -eq 0 ] && FORCEFLY=1   || error 2 ;;
+                n) [ "$NOCHECK"  == "" ] && NOCHECK="--no-check-certificate" || error 2 ;;
+                o) [ $ONLY       -eq 0 ] && ONLY=1       || error 2 ;;
+                r) [ $RESTORE    -eq 0 ] && RESTORE=1    || error 2 ;;
+                y) [ $AUTOYES    -eq 0 ] && AUTOYES=1    || error 2 ;;
+                z) [ $FORCEZIP   -eq 0 ] && FORCEZIP=1   || error 2 ;;
+                *) error 1 ;;
+            esac
+        done
+    } || {
+        [ $SETDIR -eq 1 ] && { [ -d "$a" ] && { DLDIR="$a" ; SETDIR=0 ; continue ; } || error 17 ; }
+        [ "$FWURL" == "" ] && {
+            [ $(echo "$a" | grep -qi "^http"; echo $?) -eq 0 ] && REMOTE=1
+            [ $(echo "$a" | grep -Eqi "^http(|s)://(|www.)freshtomato.org"; echo $?) -eq 0 ] && OFFICIAL=1
+            FWURL="$a"
+        } || {
+            error 2
+        }
+    }
+done
+[ $ERASE -eq 0 -a "$FWURL" == "" ] && error 3
+[ "$FWURL" != "" ] && {
+    filename="$(basename "$FWURL")"
+    extension="${filename##*.}"
+    [ "$extension" != "zip" -a "$extension" != "trx" -a "$extension" != "bin" -a "$extension" != "chk" ] && error 6
+    [ "$extension" == "zip" ] && ISZIP=1
+    [ $REMOTE -eq 0 ] && { [ ! -s "$FWURL" ] && error 9 ; }
+}
+[ "$DLDIR" != "" ] && { case "$DLDIR" in ./) DLDIR="." ;; ../) DLDIR=".." ;; esac ; }
+[ "$DLDIR" != ""  -a $REMOTE -eq 0 ] && error 21
+[ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 0 ] && error 19
+[ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 1 -a $ISZIP -eq 0 ] && error 18
+[ ! -d "$WORKDIR" -a $ERASE  -eq 0 ] && mkdir "$WORKDIR"
+[ $ONLY -eq 1 ] && { [ "$MODE" == "" -a $RESTORE -eq 0 -a $AUTOYES -eq 0 ] && { [ $REMOTE -eq 1 ] && { download ; exit 0 ; } || error 21 ; } || error 2 ; }
+[ "$MODE"   == "" ] && { [ $RESTORE -eq 1 ] && MODE="clean" || MODE="dirty"; }
+[ $RESTORE  -eq 1 ] && {
+    [ $(mount | grep -q /mnt ; echo $?) -ne 0 ] && error 4
+    NVBACKUP="$(which nvram_backup)"
+    [ "$NVBACKUP" == "" ] && { [ -s "/tmp/nvram_backup" ] && NVBACKUP="/tmp/nvram_backup" || error 5 ; }
+    AUTORUN="$(mount | grep /mnt | awk '{print $3}')/restore.autorun"
+}
+[ $(nvram get jffs2_on) -eq 1 ] && error 13
+
+
+# Main
+[ $ERASE -eq 1 ] && {
+    printf "\n\n                POINT OF NO RETURN\n\n"
+    printf "Erase all data in NVRAM memory (thorough)? $MSG"
+    read ANSWER ; echo
+    [ "$ANSWER" != "yes" ] && error 15
+    { prepare_upgrade ; erase_nvram ; rboot ; } &
+    wait
+} || {
+    [ $REMOTE -eq 1 ] && download
+    prep_file
+    printf "\n\n                POINT OF NO RETURN\n\n"
+    printf "Make sure you are using the right firmware before proceeding!\n"
+    printf "Upgrade $FULLMODEL\nRunning $OSVER\n\n"
+    printf "Proceed $MODE upgrade with firmware '$filename' ?\n"
+    [ $AUTOYES -eq 1 ] && {
+        printf "\n\nTo cancel press CTRL+C\n\n"
+        wait_loop 7 "Upgrade starting in"
+    } || {
+        printf "$MSG"
+        read ANSWER ; echo
+        [ "$ANSWER" != "yes" ] && error 15
+    }
+    ilog 6 "Starting $MODE upgrade with firmware '$filename'"
+    # starting upgrade in background to prevent disconnection incidents
+    {
+    [ $RESTORE -eq 1 ] && restore
+    prepare_upgrade
+    upgrade
+    [ "$MODE" == "clean" ] && erase_nvram
+    rboot
+    } &
+    wait
+}
+exit 0
