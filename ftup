@@ -24,7 +24,7 @@ Single option:
 
 Options:
   -c               Clean upgrade (no settings restoration).
-  -d <path>        Overrides default download directory (/tmp/t64upwd/).
+  -d <path>        Overrides default download directory (/tmp/ftupwd/).
   -f               Force 'unzip on the fly' download mode.
   -n               Use wget '--no-check-certificate'
                    (you can try this if wget fail to download the firmware).
