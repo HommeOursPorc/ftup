@@ -1,6 +1,15 @@
-Work In Progress. Test at your own risk. Only sharing my progress for the moment.
+This script aim to ease FreshTomato upgrades by letting users upgrade their FreshTomato router directly from an URL, local storage or from a local server like CIFS/SMB. The script work for both ARM and MIPS devices.
 
-make sure you know how to recover a bricked router :p
+Firmware flashing is no joke and can seriously harm your router, so please review the code before using and use with caution.
+
+I'm not responsible for any bricked devices.
+
+This is still in development and not a finish product.
+
+Any inputs or comments is welcome :)
+
+The "Restore settings" option depends on the Plaintext backup script by @rs232 and need a router that have a USB slot and a USB storage attached to it ;)
+To use this option, please refer to @rs232 thread on the linksysinfo.org forum to install the script (script only, the gui is not needed for ftup).
 
 To install and test use these commands: 
 ```
