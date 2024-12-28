@@ -24,3 +24,45 @@ To execute the script, get into the `/tmp` directory and launch the script by ty
 cd /tmp
 ftup
 ```
+
+```
+Usage: ftup [options] [firmware path or URL]
+
+Default is dirty upgrade (NVRAM untouched) unless '-c' or '-r' is specified.
+
+Single option:
+  --changelog      Print latest FreshTomato changelog.
+  --check          Print latest FreshTomato version number.
+  --erase-nvram    Erase all data in NVRAM memory (thorough).
+  --id             Identify device.
+
+Options:
+  -c               Clean upgrade (no settings restoration).
+  -d <path>        Overrides default download directory (/tmp/ftupwd/).
+  -f               Force 'unzip on the fly' download mode.
+  -n               Use wget '--no-check-certificate'
+                   (you can try this if wget fail to download the firmware).
+  -o               Only download firmware (no installation).
+  -r               Restore settings after upgrade (implies '-c'),
+                   PlainText Backup script by @rs232 is required
+                   which is available on the 'linksysinfo.org' forum.
+  -y               Automatic 'YES' to prompts. USE WITH CAUTION!
+  -z               Force zip download in tmpfs (when saving in RAM,
+                   the trx file is extracted \"on the fly\". This
+                   is for devices with low RAM that can't hold
+                   both the zip and trx files in RAM simultaneously).
+
+Infos:
+ - Single option are meant to be run without any other arguments.
+ - URL must begin with \"http(s)://\".
+ - Supported format is zip, trx, bin and chk.
+
+WARNING:
+   This script comes with no guarantee.
+   This script, especially with option '-y', could be dangerous!
+   Make sure you are using the right firmware before proceeding!
+   
+I'm NOT responsible for any bricked devices. Use at your own risks.
+   
+USE WITH CAUTION!
+```
