@@ -11,7 +11,7 @@ Any inputs or comments is welcome :)
 The "Restore settings" option depends on the Plaintext backup script by @rs232 and need a router that have a USB slot and a USB storage attached to it ;)
 To use this option, please refer to @rs232 thread on the linksysinfo.org forum to install the script (script only, the gui is not needed for ftup).
 
-To install and test use these commands: 
+To install and test ftup use these commands: 
 ```
 USERAGENT="Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/109.0"
 alias yget="/usr/bin/wget --no-check-certificate -T 15 -q -U \"$USERAGENT\" --header \"Cache-Control: no-cache\""
