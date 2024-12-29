@@ -7,8 +7,8 @@ NG() { nvram get "$1" ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2024-12-26
-ver="v0.42"
+# Last update == 2024-12-29
+ver="v0.43"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -82,6 +82,7 @@ case $1 in
 21) m="Firmware URL is missing.";;
 22) m="Firmware informations doesn't match the router informations. Make sure you are using the right firmware for your device or try to upgrade without option '-y'.";;
 23) m="Unable to fetch changelog data from Bitbucket.";;
+24) m="Cannot use JFFS partition for upgrades. Also note that JFFS cannot get unmounted while still working from the '/jffs' directory. Use 'cd' to move out of '/jffs' before using 'ftup'.";;
 esac
 ilog $e "$m"
 kill $(jobs -p) &>/dev/null
@@ -299,6 +300,36 @@ $NVBACKUP usbrestore all
 ilog 5 "Backup created successfully: $AUTORUN"
 }
 
+handle_jffs() {
+JFFS=1
+pwd | grep -q "^/jffs" && error 24
+echo "$DLDIR" | grep -q "^/jffs" && error 24
+echo "$FWURL" | grep -q "^/jffs" && error 24
+echo "
+WARNING: JFFS is enabled.
+         Make sure you have a backup of its content as
+         it is not guaranteed the content of JFFS
+         will be preserved after a firmware upgrade."
+[ $(NG jffs2_auto_unmount) -eq 1 ] && {
+    printf "         Auto unmount JFFS during upgrade is enabled.\n\n"
+    printf "JFFS will be stopped and unmounted\n"
+    printf "\nTo cancel press CTRL+C\n\n"
+    wait_loop 7 "Continuing in"
+} || {
+    [ $AUTOYES -eq 1 ] && {
+        error 13
+    } || {
+        printf "\nUnmount JFFS to continue the upgrade?\n\n"
+        printf "$MSG"
+        read ANSWER ; echo
+        [ "$ANSWER" != "yes" ] && error 15
+    }
+}
+printf "Stopping JFFS... "
+service jffs stop &>/dev/null
+printf "Done\n"
+}
+
 prepare_upgrade() {
 # Prepare firmware flashing
 sync
@@ -393,6 +424,7 @@ MODEL=""
 SDK=""
 VAR=""
 NVRAM=""
+JFFS=0
 
 
 # Check and set arguments
@@ -462,7 +494,6 @@ done
     [ "$NVBACKUP" == "" ] && { [ -s "/tmp/nvram_backup" ] && NVBACKUP="/tmp/nvram_backup" || error 5 ; }
     AUTORUN="$(mount | grep /mnt | awk '{print $3}')/restore.autorun"
 }
-[ $(nvram get jffs2_on) -eq 1 ] && error 13
 
 
 # Main
@@ -474,6 +505,7 @@ done
     { prepare_upgrade ; erase_nvram ; rboot ; } &
     wait
 } || {
+    [ $(NG jffs2_on) -eq 1 ] && handle_jffs
     [ $REMOTE -eq 1 ] && download
     prep_file
     printf "\n\n                POINT OF NO RETURN\n\n"
@@ -484,11 +516,12 @@ done
     printf "   Version: $OSVER\n\n"
     printf "Upgrade with:\n"
     printf "   $fwname\n\n"
+    [ $JFFS -eq 1 ] && printf "Warning: JFFS content might be lost, make sure to have backups!\n\n"
     [ "$MODE" == "clean" ] && printf "Warning: Clean upgrade mode selected.\nALL settings will be ERASED!\nClean upgrade is implied with option '-r'.\n\n"
     printf "Proceed $MODE upgrade?\n"
     [ $AUTOYES -eq 1 ] && {
         printf "\n\nTo cancel press CTRL+C\n\n"
-        wait_loop 7 "Upgrade starting in"
+        wait_loop 10 "Upgrade starting in"
     } || {
         printf "$MSG"
         read ANSWER ; echo
