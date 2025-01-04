@@ -328,7 +328,7 @@ WARNING: JFFS is enabled.
     }
 }
     kill_jffs() {
-        kill -9 $(ps | grep -v "jffs.*gcd" | grep -v "ftup" | grep "/jffs" | awk '{print $1}') &>/dev/null
+        kill -9 $(ps | grep -v "jffs.*gcd" | grep -v "ftup" | grep "[/]jffs" | awk '{print $1}') &>/dev/null
         which lsof &>/dev/null && {
             kill -9 $(lsof | grep -v "ftup" | grep "/jffs" | awk '{print $1}') &>/dev/null
         }
