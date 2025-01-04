@@ -7,8 +7,8 @@ NG() { nvram get "$1" ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2024-12-29
-ver="v0.43"
+# Last update == 2025-01-03
+ver="v0.44"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -82,7 +82,7 @@ case $1 in
 21) m="Firmware URL is missing.";;
 22) m="Firmware informations doesn't match the router informations. Make sure you are using the right firmware for your device or try to upgrade without option '-y'.";;
 23) m="Unable to fetch changelog data from Bitbucket.";;
-24) m="Cannot use JFFS partition for upgrades. Also note that JFFS cannot get unmounted while still working from the '/jffs' directory. Use 'cd' to move out of '/jffs' before using 'ftup'.";;
+24) m="Cannot use JFFS partition for upgrades. JFFS cannot get unmounted while still working from the '/jffs' directory.";;
 esac
 ilog $e "$m"
 kill $(jobs -p) &>/dev/null
@@ -303,6 +303,8 @@ ilog 5 "Backup created successfully: $AUTORUN"
 handle_jffs() {
 JFFS=1
 pwd | grep -q "^/jffs" && error 24
+pwd -P | grep -q "^/jffs" && error 24
+echo "$(dirname $0)" | grep -q "^/jffs" && error 24
 echo "$DLDIR" | grep -q "^/jffs" && error 24
 echo "$FWURL" | grep -q "^/jffs" && error 24
 echo "
@@ -325,8 +327,25 @@ WARNING: JFFS is enabled.
         [ "$ANSWER" != "yes" ] && error 15
     }
 }
+    kill_jffs() {
+        kill -9 $(ps | grep -v "jffs.*gcd" | grep -v "ftup" | grep "/jffs" | awk '{print $1}') &>/dev/null
+        which lsof &>/dev/null && {
+            kill -9 $(lsof | grep -v "ftup" | grep "/jffs" | awk '{print $1}') &>/dev/null
+        }
+    }
 printf "Stopping JFFS... "
+sync && sleep 2
+kill_jffs
 service jffs stop &>/dev/null
+sleep 1
+c=0
+while ps | grep -q "[j]ffs.*gcd"; do
+    [ $c -eq 5 ] && { printf "Unable to unmount JFFS\n" ; error 13 ; }
+    kill_jffs
+    umount -fl /jffs &>/dev/null
+    c=$(($c+1))
+    sleep 1
+done
 printf "Done\n"
 }
 
