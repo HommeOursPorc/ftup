@@ -304,7 +304,7 @@ handle_jffs() {
 JFFS=1
 pwd | grep -q "^/jffs" && error 24
 pwd -P | grep -q "^/jffs" && error 24
-echo "$(dirname $0)" | grep -q "^/jffs" && error 24
+dirname "$0" | grep -q "^/jffs" && error 24
 echo "$DLDIR" | grep -q "^/jffs" && error 24
 echo "$FWURL" | grep -q "^/jffs" && error 24
 echo "
