@@ -40,6 +40,8 @@ Options:
   -c               Clean upgrade (no settings restoration).
   -d <path>        Overrides default download directory (/tmp/ftupwd/).
   -f               Force 'unzip on the fly' download mode.
+                   This is for devices with low RAM that can't hold
+                   both the zip and firmware files in RAM simultaneously.
   -n               Use wget '--no-check-certificate'
                    (you can try this if wget fail to download the firmware).
   -o               Only download firmware (no installation).
@@ -47,22 +49,19 @@ Options:
                    PlainText Backup script by @rs232 is required
                    which is available on the 'linksysinfo.org' forum.
   -y               Automatic 'YES' to prompts. USE WITH CAUTION!
-  -z               Force zip download in tmpfs (when saving in RAM,
-                   the trx file is extracted \"on the fly\". This
-                   is for devices with low RAM that can't hold
-                   both the zip and trx files in RAM simultaneously).
+  -z               Force zip download in tmpfs.
 
 Infos:
  - Single option are meant to be run without any other arguments.
- - URL must begin with \"http(s)://\".
+ - URL must begin with "http(s)://".
  - Supported format is zip, trx, bin and chk.
 
 WARNING:
    This script comes with no guarantee.
    This script, especially with option '-y', could be dangerous!
    Make sure you are using the right firmware before proceeding!
-   
+
 I'm NOT responsible for any bricked devices. Use at your own risks.
-   
+
 USE WITH CAUTION!
 ```
