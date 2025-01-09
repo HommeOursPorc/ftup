@@ -7,8 +7,8 @@ NG() { nvram get "$1" ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2025-01-03
-ver="v0.44"
+# Last update == 2025-01-09
+ver="v0.45"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -77,7 +77,7 @@ case $1 in
 17) m="Destination directory doesn't exist.";;
 18) m="Can't download zip file if source is not a zip file.";;
 19) m="Can't download zip file if there's no file to download.";;
-20) m="MD5 sum didn't match source MD5.";;
+20) m="MD5 sum did NOT match! Impossible to verify downloaded firmware file integrity!";;
 21) m="Firmware URL is missing.";;
 22) m="Firmware informations doesn't match the router informations. Make sure you are using the right firmware for your device or try to upgrade without option '-y'.";;
 23) m="Unable to fetch changelog data from Bitbucket.";;
@@ -233,18 +233,12 @@ sleep 1
     [ "$SRCMD5SUM" != "" ] && {
         echo "$SRCMD5SUM" > "${DESTDIR}/${filename}.md5"
         echo "Source   MD5 sum = $SRCMD5SUM"
-        echo "Firmware MD5 sum = $DESTMD5SUM"
+        echo "Download MD5 sum = $DESTMD5SUM"
         [ "$SRCMD5SUM" == "$DESTMD5SUM" ] && echo -e "MD5 Match!\n" || ERROR=1
     } || {
         ERROR=1
     }
-    [ $ERROR -eq 1 ] && {
-        ilog 3 "Impossible to verify downloaded firmware file integrity!"
-        [ $AUTOYES -eq 1 ] && { rm -f "$FWPATH" "${DESTDIR}/${filename}.md5" ; error 20 ; }
-        printf "Continue anyway? $MSG"
-        read ANSWER ; echo
-        [ "$ANSWER" != "yes" ] && { rm -f "$FWPATH" "${DESTDIR}/${filename}.md5" ; error 15 ; }
-    }
+    [ $ERROR -eq 1 ] && { rm -f "$FWPATH" "${DESTDIR}/${filename}.md5" ; error 20 ; }
 }
 echo "saved: $FWPATH"
 [ $ONLY -eq 1 ] && printf "Download completed.\n\n"
@@ -345,6 +339,8 @@ while ps | grep -q "[j]ffs.*gcd"; do
     c=$(($c+1))
     sleep 1
 done
+lsmod | grep jffs && modprobe -r jffs jffs2 &>/dev/null
+lsmod | grep jffs && { printf "Unable to unmount JFFS\n" ; error 13 ; }
 printf "Done\n"
 }
 
