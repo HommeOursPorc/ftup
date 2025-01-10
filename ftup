@@ -339,8 +339,8 @@ while ps | grep -q "[j]ffs.*gcd"; do
     c=$(($c+1))
     sleep 1
 done
-lsmod | grep jffs && modprobe -r jffs jffs2 &>/dev/null
-lsmod | grep jffs && { printf "Unable to unmount JFFS\n" ; error 13 ; }
+lsmod | grep -q jffs && modprobe -r jffs jffs2 &>/dev/null
+lsmod | grep -q jffs && { printf "Unable to unmount JFFS\n" ; error 13 ; }
 printf "Done\n"
 }
 
