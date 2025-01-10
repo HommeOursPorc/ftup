@@ -100,7 +100,7 @@ case $1 in
     3) e="ERROR" ;;
 esac
 logger -p $1 -t $(basename "$0")[$$] "$2"
-[ $1 -le 4 ] && echo "$e: $2" || echo "$2"
+[ $1 -le 4 ] && echo -e "\n$e: $2\n" || echo "$2"
 }
 
 ctrl_c() {
@@ -496,7 +496,8 @@ done
     [ $REMOTE -eq 0 ] && { [ ! -s "$FWURL" ] && error 9 ; }
 }
 [ "$DLDIR" != "" ] && { case "$DLDIR" in ./) DLDIR="." ;; ../) DLDIR=".." ;; esac ; }
-[ "$DLDIR" != ""  -a $REMOTE -eq 0 ] && error 21
+[ "$DLDIR"   != "" -a $REMOTE -eq 0 ] && error 21
+[ "$NOCHECK" != "" -a $REMOTE -eq 0 ] && error 21
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 0 ] && error 19
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 1 -a $ISZIP -eq 0 ] && error 18
 [ ! -d "$WORKDIR" -a $ERASE  -eq 0 ] && mkdir "$WORKDIR"
