@@ -7,8 +7,8 @@ NG() { nvram get "$1" ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2025-01-09
-ver="v0.45"
+# Last update == 2025-04-06
+ver="v0.46"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -80,7 +80,7 @@ case $1 in
 20) m="MD5 sum did NOT match! Impossible to verify downloaded firmware file integrity!";;
 21) m="Firmware URL is missing.";;
 22) m="Firmware informations doesn't match the router informations. Make sure you are using the right firmware for your device or try to upgrade without option '-y'.";;
-23) m="Unable to fetch changelog data from Bitbucket.";;
+23) m="Unable to fetch changelog data from GitHub.";;
 24) m="Cannot use JFFS partition for upgrades. JFFS cannot get unmounted while still working from the '/jffs' directory.";;
 esac
 ilog $e "$m"
@@ -161,13 +161,11 @@ https://www.linksysinfo.org/index.php?threads/freshtomato-upgrade-script-v0-11.7
 }
 
 changelog() {
-BITBUCKET="https://bitbucket.org/pedro311/freshtomato"
-yget -q --no-check-certificate -O /tmp/ftup_cl.txt "${BITBUCKET}-${CPU}/src/${CPU}-master/CHANGELOG"
+echo "Getting changelog from https://github.com/FreshTomato-Project ..."
+yget -q --no-check-certificate -O /tmp/ftup_cl.txt "https://github.com/FreshTomato-Project/freshtomato-${CPU}/raw/refs/heads/${CPU}-master/CHANGELOG"
 [ $? -ne 0 ] && error 23
-COMMIT="$(grep -Eo 'commit/.*"}' /tmp/ftup_cl.txt | sed "s/\".*//;s/commit\///")"
+echo -e "YOUR VERSION = $CURVER\nTO QUIT PRESS 'Q'\n\n$(cat /tmp/ftup_cl.txt)" | less
 rm -f /tmp/ftup_cl.txt
-CLURL="${BITBUCKET}-${CPU}/raw/${COMMIT}/CHANGELOG"
-echo -e "YOUR VERSION = $CURVER\nTO QUIT PRESS 'Q'\n\n$(yget -q --no-check-certificate -O- "$CLURL")" | less
 }
 
 check_update() {
