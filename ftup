@@ -200,7 +200,7 @@ fw_list() {
 VER=""
 BUILD=""
 SED="\(BTgui-VPN\|BT-VPN\|BT\|Big-VPN\|Nocat-VPN\|Mega-VPN\|IPv6-VPN\|AIO_Lite\|AIO\|Custom\|MiniIPv6\|MiniVPN2\|MiniVPN\|Mini\|Max\|VPN\)"
-GREP=$(echo $SED | tr -d "\\()" | tr "|" "\n")
+GREP=$(echo "$SED" | tr -d "\\()" | tr "|" "\n")
 URL="https://freshtomato.org/downloads/freshtomato-${CPU}"
 NODE=""
 TMPLIST="/tmp/tmplist.txt"
@@ -255,7 +255,7 @@ yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NO
         PATTERN="${PATTERN}MIPSR1_$SDK-$VER"
     elif [ "$MIPSREV" == "MIPSR1" -a $USB -eq 1 ]; then
         PATTERN="${PATTERN}MIPSR1_$SDK-USB-$VER"
-    elif [ $(echo "$BUILD" | grep -c "K$") -eq 1 ]; then
+    elif [ $(echo "$VAR" | grep -ci "K$") -eq 1 ]; then
         PATTERN="${PATTERN}MIPSR2_$SDK-USB-$VER"
         SPECIAL=1
     elif [ "$MIPSREV" == "MIPSR2" -a $USB -eq 0 ]; then
@@ -264,25 +264,30 @@ yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NO
         PATTERN="${PATTERN}MIPSR2_$SDK-USB-NVRAM$NVRAM-$VER"
     fi
     [ $SPECIAL -eq 0 ] && {
-        grep "$PATTERN" "$TMPLIST" > "$FWLIST"
+        grep -i "$PATTERN" "$TMPLIST" > "$FWLIST"
     } || {
-        sed "s/\.zip//g" "$TMPLIST" | grep "K$" | grep "$PATTERN" > "$FWLIST"
+        sed "s/\.zip//g" "$TMPLIST" | grep "K$" | grep -i "$PATTERN" > "$FWLIST"
     }
 }
 rm -f "$TMPLIST"
 [ $(wc -l "$FWLIST" | awk '{print $1}') -eq 0 ] && error 28
-# If --list-firmware then quit function
-# List of firmware in /tmp/fwlist.txt
 [ $LIST -eq 1 ] && return 0
-# Else echo 1x firmware
-[ $(grep -c "$BUILD" "$FWLIST") -eq 1 ] && grep "$BUILD" "$FWLIST" || error 28
+[ $(grep -ci "$BUILD" "$FWLIST") -ne 1 ] && error 28
+grep -i "$BUILD" "$FWLIST" > /tmp/fw.url
+}
+
+fw_get() {
+# $1 == version/build
+[ $# -eq 1 ] && fw_list "$1" || fw_list
+[ -s /tmp/fw.url ] && FWURL="$(cat /tmp/fw.url)" || error 28
+exit 99
 }
 
 fw_show() {
 # $1 == version
 LIST=1
 FWLIST="/tmp/fwlist.txt"
-[ $# -eq 1 ] && fw_list $1 || fw_list
+[ $# -eq 1 ] && fw_list "$1" || fw_list
 cat "$FWLIST"
 }
 
@@ -532,6 +537,10 @@ MSG="To continue type [yes], to cancel type [n]: "
 OPTIONS=""
 MODE=""
 FAIL=0
+AUTOUP=0
+GETFW=0
+SETFW=0
+GETFWARG=""
 REMOTE=0
 OFFICIAL=0
 FORCEZIP=0
@@ -586,15 +595,19 @@ LIST=0
 [ $# -eq 2 -a "$1" == "--list-firmware" ] && { fw_show "$2" ; exit 0 ; }
 [ $ERASE -eq 0 ] && {
 for a in "$@"; do
+    [ $SETFW -eq 1 ] && { SETFW=0 ; printf "%s" "$a" | grep -qv "^-" && { GETFWARG="$a" ; continue ; } }
     printf "%s" "$a" | grep -q "^-" && {
+        printf "%s" "$a" | grep -qE "g.*d|d.*g" && error 2
         a="$(printf "%s" "$a" | tr -d "-")"
         [ "$a" == "" ] && error 1
         OPTIONS="$(printf "%s" "$a" | grep -o . )"
         for o in $OPTIONS; do
             case $o in
+                a) [ $AUTOUP     -eq 0 ] && AUTOUP=1     || error 2 ;;
                 c) [ "$MODE"     == "" ] && MODE="clean" || error 2 ;;
                 d) [ "$DLDIR"    == "" ] && { DLDIR=1 ; SETDIR=1 ; }         || error 2 ;;
                 f) [ $FORCEFLY   -eq 0 ] && FORCEFLY=1   || error 2 ;;
+                g) [ $GETFW      -eq 0 ] && { GETFW=1 ; SETFW=1  ; }         || error 2 ;;
                 n) [ "$NOCHECK"  == "" ] && NOCHECK="--no-check-certificate" || error 2 ;;
                 o) [ $ONLY       -eq 0 ] && ONLY=1       || error 2 ;;
                 r) [ $RESTORE    -eq 0 ] && RESTORE=1    || error 2 ;;
@@ -615,7 +628,10 @@ for a in "$@"; do
     }
 done
 }
-[ $ERASE -eq 0 -a "$FWURL" == "" ] && error 3
+[ $AUTOUP -eq 1 -a $GETFW -eq 1 ] && error 2
+[ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$FWURL" != "" ] && error 2 ; }
+[ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { REMOTE=1 ; OFFICIAL=1 ; }
+[ $AUTOUP -eq 0 -a $GETFW -eq 0 -a $ERASE -eq 0 -a "$FWURL" == "" ] && error 3
 [ "$FWURL" != "" ] && {
     filename="$(basename "$FWURL")"
     extension="${filename##*.}"
@@ -649,6 +665,8 @@ done
     wait
 } || {
     [ $(NG jffs2_on) -eq 1 ] && handle_jffs
+    [ $GETFW -eq 1 -a "$GETFWARG" != "" ] && fw_get "$GETFWARG"
+    [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$GETFWARG" == "" ] && fw_get ; }
     [ $REMOTE -eq 1 ] && download
     prep_file
     printf "\n\n                POINT OF NO RETURN\n\n"
