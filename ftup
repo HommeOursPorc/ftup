@@ -7,8 +7,8 @@ NG() { nvram get "$1" ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2025-04-06
-ver="v0.47"
+# Last update == 2025-04-24
+ver="v0.48"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -151,13 +151,6 @@ ID="$(NG odmpid)"
 [ "$FIX" == "$TMODEL" ] && MODEL="$FIX" || { [ "$ID" != "" ] && MODEL="$ID" || MODEL="$FIX" ; }
 [ "$MATCH" != "" ] && { [ "$MATCH" == "$MODEL" ] && ACCURACY=100 || MODEL="$MATCH" ; }
 SDK="$(echo "$OSVER" | awk '{ for(i=1; i<=NF; i++) { if(match($i, /^K+/)) { print $i; break; } } }')" # eg K26ARM
-case "$SDK" in
-    RTAC) SDKFULL="K26RT-AC";;
-    RTN ) SDKFULL="K26RT-N";;
-    RT  ) SDKFULL="K26";;
-    *   ) SDKFULL="$SDK";;
-esac
-VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
 [ "$CPU" == "mips" ] && {
     MIPSREV="$(echo "$SDK" | cut -d "_" -f1 | sed "s/K26//i")"
     SDK="$(echo "$SDK" | cut -d "_" -f2)"
@@ -165,6 +158,13 @@ VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
 } || {
     NVRAM="$(nvram show 2>&1 >/dev/null | tr -d "()" | awk '{print ($2+$4)/1024}')K"
 }
+case "$SDK" in
+    RTAC) SDKFULL="K26RT-AC";;
+    RTN ) SDKFULL="K26RT-N";;
+    RT  ) SDKFULL="K26";;
+    *   ) SDKFULL="$SDK";;
+esac
+VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
 }
 
 id_show() {
@@ -220,7 +220,7 @@ id
 [ $(echo "$VER" | grep -cE '20[0-9][0-9]\.[0-9]($|[0-9]$)') -ne 1 ] && error 25
 YEAR="${VER%.*}"
 [ $LIST -eq 1 ] && {
-    BUILD="$(echo "$VAR" | sed "s/$SED/\.\+/i")"
+    BUILD="$(echo "$VAR" | sed "s/$SED/\.\*/i")"
 } || {
     [ "$BUILD" == "" ] && {
         BUILD="$VAR"
@@ -245,24 +245,25 @@ yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NO
 [ ! -s "$TMPLIST" ] && error 27
 [ $ACCURACY -ge 50 ] && {
     # Named
-    grep -qi "$MODEL" "$TMPLIST" || error 28
-    grep -wi "$MODEL" "$TMPLIST" > "$FWLIST"
+    grep -qi "$MODEL.*$BUILD" "$TMPLIST" || error 28
+    grep -wi "$MODEL.*$BUILD" "$TMPLIST" > "$FWLIST"
 } || {
     # Unnamed
-    PATTERN="^freshtomato-K26"
+    PATTERN="freshtomato-K26"
     SPECIAL=0
     if [ "$MIPSREV" == "MIPSR1" -a $USB -eq 0 ]; then
-        PATTERN="${PATTERN}MIPSR1_$SDK-$VER"
+        PATTERN="${PATTERN}MIPSR1_$SDK"
     elif [ "$MIPSREV" == "MIPSR1" -a $USB -eq 1 ]; then
-        PATTERN="${PATTERN}MIPSR1_$SDK-USB-$VER"
+        PATTERN="${PATTERN}MIPSR1_$SDK-USB"
     elif [ $(echo "$VAR" | grep -ci "K$") -eq 1 ]; then
-        PATTERN="${PATTERN}MIPSR2_$SDK-USB-$VER"
+        PATTERN="${PATTERN}MIPSR2_$SDK-USB"
         SPECIAL=1
     elif [ "$MIPSREV" == "MIPSR2" -a $USB -eq 0 ]; then
-        PATTERN="${PATTERN}MIPSR2_$SDK-NVRAM$NVRAM-$VER"
+        PATTERN="${PATTERN}MIPSR2_$SDK-NVRAM$NVRAM"
     elif [ "$MIPSREV" == "MIPSR2" -a $USB -eq 1 ]; then
-        PATTERN="${PATTERN}MIPSR2_$SDK-USB-NVRAM$NVRAM-$VER"
+        PATTERN="${PATTERN}MIPSR2_$SDK-USB-NVRAM$NVRAM"
     fi
+    PATTERN="$PATTERN-$VER-$BUILD"
     [ $SPECIAL -eq 0 ] && {
         grep -i "$PATTERN" "$TMPLIST" > "$FWLIST"
     } || {
@@ -270,16 +271,16 @@ yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NO
     }
 }
 rm -f "$TMPLIST"
-[ $(wc -l "$FWLIST" | awk '{print $1}') -eq 0 ] && error 28
-[ $LIST -eq 1 ] && return 0
-[ $(grep -ci "$BUILD" "$FWLIST") -ne 1 ] && error 28
-grep -i "$BUILD" "$FWLIST" > /tmp/fw.url
+[ ! -s "$FWLIST" ] && error 28
+[ $LIST -eq 0 -a $(wc -l "$FWLIST" | awk '{print $1}') -ne 1 ] && error 28 || return 0
 }
 
 fw_get() {
 # $1 == version/build
+FWLIST="/tmp/fwlist.txt"
 [ $# -eq 1 ] && fw_list "$1" || fw_list
-[ -s /tmp/fw.url ] && FWURL="$(cat /tmp/fw.url)" || error 28
+FWURL="$(cat "$FWLIST")"
+echo "$FWURL"
 exit 99
 }
 
@@ -596,6 +597,7 @@ LIST=0
 [ $ERASE -eq 0 ] && {
 for a in "$@"; do
     [ $SETFW -eq 1 ] && { SETFW=0 ; printf "%s" "$a" | grep -qv "^-" && { GETFWARG="$a" ; continue ; } }
+    printf "%s" "$a" | grep -q "^--" && error 1
     printf "%s" "$a" | grep -q "^-" && {
         printf "%s" "$a" | grep -qE "g.*d|d.*g" && error 2
         a="$(printf "%s" "$a" | tr -d "-")"
