@@ -265,9 +265,9 @@ yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NO
     fi
     PATTERN="$PATTERN-$VER-$BUILD"
     [ $SPECIAL -eq 0 ] && {
-        grep -i "$PATTERN" "$TMPLIST" > "$FWLIST"
+        grep -wi "$PATTERN" "$TMPLIST" > "$FWLIST"
     } || {
-        sed "s/\.zip//g" "$TMPLIST" | grep "K$" | grep -i "$PATTERN" > "$FWLIST"
+        sed "s/\.zip//g" "$TMPLIST" | grep "K$" | grep -wi "$PATTERN" > "$FWLIST"
     }
 }
 rm -f "$TMPLIST"
