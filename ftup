@@ -8,7 +8,7 @@ trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
 # Last update == 2025-04-24
-ver="v0.48"
+ver="v0.49"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -277,19 +277,50 @@ rm -f "$TMPLIST"
 
 fw_get() {
 # $1 == version/build
+[ $AUTOYES -eq 1 ] && { echo "Full auto upgrades are currently disabled until this feature is proven to be working perfectly." ; error 15 ; }
 FWLIST="/tmp/fwlist.txt"
+echo "
+This feature is experimental. Use with caution.
+Double check that it output the right firmware before upgrading.
+I am not responsible for any bricked device.
+"
 [ $# -eq 1 ] && fw_list "$1" || fw_list
 FWURL="$(cat "$FWLIST")"
-echo "$FWURL"
-exit 99
+get_filename
+echo "USE WITH CAUTION!      
+
+$FULLMODEL
+FreshTomato $OSVER
+
+Upgrade with this firmware?
+$FWURL
+"
+printf "$MSG"
+read ANSWER ; echo
+[ "$ANSWER" != "yes" ] && error 15
 }
 
 fw_show() {
 # $1 == version
 LIST=1
 FWLIST="/tmp/fwlist.txt"
+echo "
+This feature is experimental. Use with caution.
+Double check that it list the right firmware before upgrading.
+I am not responsible for any bricked device.
+"
 [ $# -eq 1 ] && fw_list "$1" || fw_list
-cat "$FWLIST"
+echo "$FULLMODEL
+FreshTomato $OSVER
+
+Available firmware:
+$(for f in $(cat "$FWLIST"); do basename "$f"; done)
+
+Firmware can be found here:
+$(dirname $(head -n1 "$FWLIST"))
+
+USE WITH CAUTION!
+"
 }
 
 changelog() {
@@ -303,9 +334,16 @@ rm -f /tmp/ftup_cl.txt
 check_update() {
 LATESTVER="$(yget -q --no-check-certificate -O- "http://freshtomato.org/version.txt")"
 [ "$LATESTVER" == "" ] && error 16
+MAJ="$(echo $CURVER | cut -d'.' -f1)"
+MIN="$(echo $CURVER | cut -d'.' -f2)"
+LMAJ="$(echo $LATESTVER | cut -d'.' -f1)"
+LMIN="$(echo $LATESTVER | cut -d'.' -f2)"
+UP=0
 echo "Current version = $CURVER
 Latest  version = $LATESTVER"
-[ $(echo $LATESTVER | tr -d ".") -gt $(echo $CURVER | tr -d ".") ] && echo -e "UPDATE AVAILABLE!"
+[ $LMAJ -gt $MAJ ] && UP=1
+[ $LMAJ -eq $MAJ -a $LMIN -gt $MIN ] && UP=1
+[ $UP -eq 1 ] && echo "UPDATE AVAILABLE!"
 }
 
 enough_memory() {
@@ -314,6 +352,13 @@ enough_memory() {
 # enoughmem=1 --> yes (proceed)
 AVAIL=$(awk '/MemFree/ {print $2}' /proc/meminfo)
 [ $1 -ge $AVAIL ] && echo 0 || echo 1
+}
+
+get_filename() {
+filename="$(basename "$FWURL")"
+extension="${filename##*.}"
+[ "$extension" != "zip" -a "$extension" != "trx" -a "$extension" != "bin" -a "$extension" != "chk" ] && error 6
+[ "$extension" == "zip" ] && ISZIP=1
 }
 
 download() {
@@ -402,10 +447,11 @@ fwname="$(basename "$FWPATH")"
 [ "$CPU" == "arm" -a "$MODEL" != "R1D" ] && {
     [ "$(tail -n1 "$FWPATH" | strings | tail -n1)" != "$MODEL" ] && WARN="WARNING: Model name $MODEL NOT found inside the firmware file footer.\n"
 }
-[ $(echo "$fwname" | grep -c "$SDK") -ne 1 ] && WARN="${WARN}WARNING: Router SDK (${SDK}) doesn't match the one stated in the firmware name.\n"
+[ $(echo "$fwname" | grep -ci "$SDK") -ne 1 ] && WARN="${WARN}WARNING: Router SDK (${SDK}) doesn't match the one stated in the firmware name.\n"
 nvsize="$(echo "$fwname" | grep -Eo "(|[1-9])[1-9][1-9]K")"
 [ "$nvsize" != "$NVRAM" ] && WARN="${WARN}WARNING: NVRAM size (${NVRAM}) doesn't match with the size stated in the firmware name (${nvsize}).\n"
-# check for mips r1 vs r2 ???
+[ "$CPU" == "mips" -a $(echo "$fwname" | grep -ci "$MIPSREV") -ne 1 ] && WARN="${WARN}WARNING: MIPS version (${MIPSREV}) doesn't match with the one stated in the firmware name.\n"
+[ "$CPU" == "arm" -a $(echo "$fwname" | grep -ci "ARM") -ne 1 ] && WARN="${WARN}WARNING: CPU version (ARM) doesn't match with the one stated in the firmware name.\n"
 [ "$WARN" != "" ] && {
     printf "\n$WARN"
     [ $AUTOYES -eq 1 ] && error 22
@@ -632,13 +678,10 @@ done
 }
 [ $AUTOUP -eq 1 -a $GETFW -eq 1 ] && error 2
 [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$FWURL" != "" ] && error 2 ; }
-[ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { REMOTE=1 ; OFFICIAL=1 ; }
+[ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { REMOTE=1 ; OFFICIAL=1 ; ISZIP=1 ; }
 [ $AUTOUP -eq 0 -a $GETFW -eq 0 -a $ERASE -eq 0 -a "$FWURL" == "" ] && error 3
 [ "$FWURL" != "" ] && {
-    filename="$(basename "$FWURL")"
-    extension="${filename##*.}"
-    [ "$extension" != "zip" -a "$extension" != "trx" -a "$extension" != "bin" -a "$extension" != "chk" ] && error 6
-    [ "$extension" == "zip" ] && ISZIP=1
+    get_filename
     [ $REMOTE -eq 0 ] && { [ ! -s "$FWURL" ] && error 9 ; }
 }
 [ "$DLDIR" != "" ] && { case "$DLDIR" in ./) DLDIR="." ;; ../) DLDIR=".." ;; esac ; }
@@ -647,7 +690,8 @@ done
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 0 ] && error 19
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 1 -a $ISZIP -eq 0 ] && error 18
 [ ! -d "$WORKDIR" -a $ERASE  -eq 0 ] && mkdir "$WORKDIR"
-[ $ONLY -eq 1 ] && { [ "$MODE" == "" -a $RESTORE -eq 0 -a $AUTOYES -eq 0 ] && { [ $REMOTE -eq 1 ] && { download ; exit 0 ; } || error 21 ; } || error 2 ; }
+[ $ONLY -eq 1 ] && { [ "$MODE" != "" -o $RESTORE -eq 1 -o $AUTOYES -eq 1 ] && error 2 ; }
+[ $ONLY -eq 1 -a $REMOTE -eq 0 ] && error 21
 [ "$MODE"   == "" ] && { [ $RESTORE -eq 1 ] && MODE="clean" || MODE="dirty"; }
 [ $RESTORE  -eq 1 ] && {
     [ $(mount | grep -q /mnt ; echo $?) -ne 0 ] && error 4
@@ -666,10 +710,11 @@ done
     { prepare_upgrade ; erase_nvram ; rboot ; } &
     wait
 } || {
-    [ $(NG jffs2_on) -eq 1 ] && handle_jffs
+    [ $ONLY -eq 0 -a $(NG jffs2_on) -eq 1 ] && handle_jffs
     [ $GETFW -eq 1 -a "$GETFWARG" != "" ] && fw_get "$GETFWARG"
     [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$GETFWARG" == "" ] && fw_get ; }
     [ $REMOTE -eq 1 ] && download
+    [ $ONLY -eq 1 ] && exit 0
     prep_file
     printf "\n\n                POINT OF NO RETURN\n\n"
     printf "Make sure you are using the right firmware before proceeding!\n\n"
