@@ -2,13 +2,13 @@
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/home/root:
 USERAGENT="Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/109.0"
 alias yget="/usr/bin/wget -T 15 -U \"$USERAGENT\" --header \"Cache-Control: no-cache\""
-#. nvram_ops #for future use
-NG() { nvram get "$1" ; }
+#. nvram_ops # for future use
+NG() { nvram get "$1" ; } # for backward compatibility
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2025-04-24
-ver="v0.49"
+# Last update == 2025-04-28
+ver="v0.50"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -38,7 +38,8 @@ Options:
                    Default (no args): Get latest version and same
                    build as the one currently running.
                    Optional: ver. (version), e.g. 2024.4
-                   Optional: build, e.g. Mini, Max, VPN, AIO, etc. 
+                   Optional: build, e.g. Mini, Max, VPN, AIO, etc.
+                   e.g. -g 2025.2/AIO
   -n               Use wget '--no-check-certificate'
                    (you can try this if wget fail to download the firmware).
   -o               Only download firmware (no installation).
@@ -81,7 +82,7 @@ case $1 in
 10) m="ZIP archive is corrupted.";;
 11) m="Can't unzip archive, it's either corrupted or not enough RAM.";;
 12) m="ZIP archive countain zero or more than one firmware.";;
-13) m="Upgrading firmware with JFFS enabled is not possible.";;
+13) m="Upgrading firmware with JFFS enabled is not possible. Optionally you can enable 'Unmount JFFS during upgrade' in the webUI in 'Administration > Admin Access'";;
 14) m="Backup is missing. Settings restoration is not possible.";;
 15) e=5; m="Operation cancelled.";;
 16) m="Can't fetch newest version number from freshtomato.org.";;
@@ -216,7 +217,7 @@ id
         [ $(echo "$1" | grep -cE '20[0-9][0-9]\.[0-9]($|[0-9]$)') -eq 1 ] && VER="$1" || BUILD="$1"
     }
 }
-[ "$VER" == "" ] && VER="$(check_update | awk -F'=' '/Latest/ {print $2}' | tr -d ' ')"
+[ "$VER" == "" ] && { check_update -q ; VER="$LATESTVER" ; }
 [ $(echo "$VER" | grep -cE '20[0-9][0-9]\.[0-9]($|[0-9]$)') -ne 1 ] && error 25
 YEAR="${VER%.*}"
 [ $LIST -eq 1 ] && {
@@ -277,42 +278,52 @@ rm -f "$TMPLIST"
 
 fw_get() {
 # $1 == version/build
-[ $AUTOYES -eq 1 ] && { echo "Full auto upgrades are currently disabled until this feature is proven to be working perfectly." ; error 15 ; }
+[ $# -eq 1 ] && ARGS="$1" || ARGS=""
 FWLIST="/tmp/fwlist.txt"
-echo "
+[ $AUTOYES -eq 1 ] && { echo "Full auto upgrades are currently disabled until this feature is proven to be working perfectly." ; error 15 ; }
+[ $AUTOUP -eq 1 ] && {
+    check_update -q
+    [ $CANUP -eq 0 ] && { printf "\nNo upgrade available.\n\n" ; exit 0 ; } || ARGS="$LATESTVER"
+}
+echo -e "\n
 This feature is experimental. Use with caution.
 Double check that it output the right firmware before upgrading.
 I am not responsible for any bricked device.
 "
-[ $# -eq 1 ] && fw_list "$1" || fw_list
+[ "$ARGS" != "" ] && fw_list "$ARGS" || fw_list
 FWURL="$(cat "$FWLIST")"
 get_filename
-echo "USE WITH CAUTION!      
+echo -e "USE WITH CAUTION!
 
 $FULLMODEL
 FreshTomato $OSVER
-
+$([ $CANUP -eq 1 ] && printf "%s" "\nNew version $LATESTVER is available.\n\n")
 Upgrade with this firmware?
 $FWURL
 "
-printf "$MSG"
-read ANSWER ; echo
-[ "$ANSWER" != "yes" ] && error 15
+#[ $AUTOYES -eq 1 ] && {
+#    printf "\n\nTo cancel press CTRL+C\n\n"
+#    wait_loop 10 "Download starting in"
+#} || {
+    printf "$MSG"
+    read ANSWER ; echo
+    [ "$ANSWER" != "yes" ] && error 15
+#}
 }
 
 fw_show() {
 # $1 == version
 LIST=1
 FWLIST="/tmp/fwlist.txt"
-echo "
+echo -e "
 This feature is experimental. Use with caution.
 Double check that it list the right firmware before upgrading.
 I am not responsible for any bricked device.
 "
 [ $# -eq 1 ] && fw_list "$1" || fw_list
-echo "$FULLMODEL
+echo -e "$FULLMODEL
 FreshTomato $OSVER
-
+$([ $CANUP -eq 1 ] && printf "%s" "\nNew version '$LATESTVER' is available.\n\n")
 Available firmware:
 $(for f in $(cat "$FWLIST"); do basename "$f"; done)
 
@@ -332,18 +343,21 @@ rm -f /tmp/ftup_cl.txt
 }
 
 check_update() {
+# $1 == Quiet/Silent
+SILENT=0
+[ $# -eq 1 ] && { [ "$1" == "-q" ] && SILENT=1 ; }
 LATESTVER="$(yget -q --no-check-certificate -O- "http://freshtomato.org/version.txt")"
 [ "$LATESTVER" == "" ] && error 16
-MAJ="$(echo $CURVER | cut -d'.' -f1)"
-MIN="$(echo $CURVER | cut -d'.' -f2)"
-LMAJ="$(echo $LATESTVER | cut -d'.' -f1)"
-LMIN="$(echo $LATESTVER | cut -d'.' -f2)"
+MAJ="${CURVER%.*}"
+MIN="${CURVER##*.}"
+LMAJ="${LATESTVER%.*}"
+LMIN="${LATESTVER##*.}"
 UP=0
-echo "Current version = $CURVER
+[ $SILENT -eq 0 ] && echo "Current version = $CURVER
 Latest  version = $LATESTVER"
 [ $LMAJ -gt $MAJ ] && UP=1
 [ $LMAJ -eq $MAJ -a $LMIN -gt $MIN ] && UP=1
-[ $UP -eq 1 ] && echo "UPDATE AVAILABLE!"
+[ $UP -eq 1 ] && { CANUP=1 ; [ $SILENT -eq 0 ] && echo "UPDATE AVAILABLE!" ; }
 }
 
 enough_memory() {
@@ -532,7 +546,6 @@ c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne
 
 upgrade() {
 # Write firmware file
-ilog 6 "Writing firmware $fwname"
 [ -e "${WORKDIR}/ftup.out" ] && rm -f ${WORKDIR}/ftup.out
 [ "$CPU" == "arm" ] && {
     nohup mtd-write2 ${FWPATH} linux > ${WORKDIR}/ftup.out 2>/dev/null &
@@ -613,6 +626,8 @@ TMPFS=0
 MIPSREV=""
 OSVER="$(NG os_version)"
 CURVER="$(echo "$OSVER" | awk '{print $1}')" # eg 2023.3
+LATESTVER=""
+CANUP=0
 FULLMODEL="$(NG t_model_name)"
 MAKE=""
 MODEL=""
@@ -646,7 +661,7 @@ for a in "$@"; do
     printf "%s" "$a" | grep -q "^--" && error 1
     printf "%s" "$a" | grep -q "^-" && {
         printf "%s" "$a" | grep -qE "g.*d|d.*g" && error 2
-        a="$(printf "%s" "$a" | tr -d "-")"
+        a="$(printf "%s" "$a" | cut -c 2-)"
         [ "$a" == "" ] && error 1
         OPTIONS="$(printf "%s" "$a" | grep -o . )"
         for o in $OPTIONS; do
@@ -676,7 +691,10 @@ for a in "$@"; do
     }
 done
 }
+[ $SETDIR -eq 1 ] && error 17
 [ $AUTOUP -eq 1 -a $GETFW -eq 1 ] && error 2
+[ $AUTOUP -eq 1 -a $ONLY  -eq 1 ] && error 2
+#[ $AUTOUP -eq 1 ] && AUTOYES=1
 [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$FWURL" != "" ] && error 2 ; }
 [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { REMOTE=1 ; OFFICIAL=1 ; ISZIP=1 ; }
 [ $AUTOUP -eq 0 -a $GETFW -eq 0 -a $ERASE -eq 0 -a "$FWURL" == "" ] && error 3
