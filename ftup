@@ -457,15 +457,16 @@ prep_file() {
 # check if right firmware if possible
 [ "$MODEL" == "" ] && id
 WARN=""
+WMSG="doesn't match the one stated in the firmware name"
 fwname="$(basename "$FWPATH")"
 [ "$CPU" == "arm" -a "$MODEL" != "R1D" ] && {
     [ "$(tail -n1 "$FWPATH" | strings | tail -n1)" != "$MODEL" ] && WARN="WARNING: Model name $MODEL NOT found inside the firmware file footer.\n"
 }
-[ $(echo "$fwname" | grep -ci "$SDK") -ne 1 ] && WARN="${WARN}WARNING: Router SDK (${SDK}) doesn't match the one stated in the firmware name.\n"
+[ $ACCURACY -ge 50 ] && { [ $(echo "$fwname" | grep -ci "$MODEL") -ne 1 ] && WARN="${WARN}WARNING: Router Model (${MODEL}) ${WMSG}.\n" ; }
+[ $(echo "$fwname" | grep -ci "$SDK") -ne 1 ] && WARN="${WARN}WARNING: Router SDK (${SDK}) ${WMSG}.\n"
 nvsize="$(echo "$fwname" | grep -Eo "(|[1-9])[1-9][1-9]K")"
-[ "$nvsize" != "$NVRAM" ] && WARN="${WARN}WARNING: NVRAM size (${NVRAM}) doesn't match with the size stated in the firmware name (${nvsize}).\n"
-[ "$CPU" == "mips" -a $(echo "$fwname" | grep -ci "$MIPSREV") -ne 1 ] && WARN="${WARN}WARNING: MIPS version (${MIPSREV}) doesn't match with the one stated in the firmware name.\n"
-[ "$CPU" == "arm" -a $(echo "$fwname" | grep -ci "ARM") -ne 1 ] && WARN="${WARN}WARNING: CPU version (ARM) doesn't match with the one stated in the firmware name.\n"
+[ "$nvsize" != "$NVRAM" ] && WARN="${WARN}WARNING: NVRAM size (${NVRAM}) ${WMSG} (${nvsize}).\n"
+[ "$CPU" == "mips" -a $(echo "$fwname" | grep -ci "$MIPSREV") -ne 1 ] && WARN="${WARN}WARNING: MIPS version (${MIPSREV}) ${WMSG}.\n"
 [ "$WARN" != "" ] && {
     printf "\n$WARN"
     [ $AUTOYES -eq 1 ] && error 22
@@ -484,7 +485,6 @@ ilog 5 "Backup created successfully: $AUTORUN"
 }
 
 handle_jffs() {
-JFFS=1
 pwd | grep -q "^/jffs" && error 24
 pwd -P | grep -q "^/jffs" && error 24
 dirname "$0" | grep -q "^/jffs" && error 24
@@ -517,6 +517,7 @@ WARNING: JFFS is enabled.
         }
     }
 printf "Stopping JFFS... "
+[ $(ps | grep -c "[j]ffs.*gcd") -eq 0 -a $(lsmod | grep -c "jffs") -eq 0 ] && { printf "Done\n" ; return 0 ; }
 sync && sleep 2
 kill_jffs
 service jffs stop &>/dev/null
@@ -637,7 +638,7 @@ SDK=""
 SDKFULL=""
 VAR=""
 NVRAM=""
-JFFS=0
+[ $(NG jffs2_on) -eq 1 ] && JFFS=1 || JFFS=0
 LIST=0
 
 
@@ -728,7 +729,7 @@ done
     { prepare_upgrade ; erase_nvram ; rboot ; } &
     wait
 } || {
-    [ $ONLY -eq 0 -a $(NG jffs2_on) -eq 1 ] && handle_jffs
+    [ $ONLY -eq 0 -a $JFFS -eq 1 ] && handle_jffs
     [ $GETFW -eq 1 -a "$GETFWARG" != "" ] && fw_get "$GETFWARG"
     [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$GETFWARG" == "" ] && fw_get ; }
     [ $REMOTE -eq 1 ] && download
