@@ -2,13 +2,13 @@
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/home/root:
 USERAGENT="Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/109.0"
 alias yget="/usr/bin/wget -T 15 -U \"$USERAGENT\" --header \"Cache-Control: no-cache\""
-#. nvram_ops #for future use
-NG() { nvram get "$1" ; }
+#. nvram_ops # for future use
+NG() { nvram get "$1" ; } # for backward compatibility
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2025-04-06
-ver="v0.46"
+# Last update == 2025-04-28
+ver="v0.50"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -22,13 +22,24 @@ Single option:
   --check          Print latest FreshTomato version number.
   --erase-nvram    Erase all data in NVRAM memory (thorough).
   --id             Identify device.
+  --list-firmware  Experimental: List available firmware.
+                   Default: Latest version.
+                   Optional: Specify version to list,
+                   e.g. --list-firmware 2025.2
 
 Options:
+  -a               Experimental: Auto upgrade to the latest firmware.
   -c               Clean upgrade (no settings restoration).
   -d <path>        Overrides default download directory (/tmp/ftupwd/).
   -f               Force 'unzip on the fly' download mode.
                    This is for devices with low RAM that can't hold
                    both the zip and firmware files in RAM simultaneously).
+  -g (ver./build)  Experimental: Get (download) chosen firmware.
+                   Default (no args): Get latest version and same
+                   build as the one currently running.
+                   Optional: ver. (version), e.g. 2024.4
+                   Optional: build, e.g. Mini, Max, VPN, AIO, etc.
+                   e.g. -g 2025.2/AIO
   -n               Use wget '--no-check-certificate'
                    (you can try this if wget fail to download the firmware).
   -o               Only download firmware (no installation).
@@ -42,6 +53,7 @@ Infos:
  - Single option are meant to be run without any other arguments.
  - URL must begin with \"http(s)://\".
  - Supported format is zip, trx, bin and chk.
+ - Experimental features can be inaccurate, use at your own risk.
 
 WARNING:
    This script comes with no guarantee.
@@ -70,7 +82,7 @@ case $1 in
 10) m="ZIP archive is corrupted.";;
 11) m="Can't unzip archive, it's either corrupted or not enough RAM.";;
 12) m="ZIP archive countain zero or more than one firmware.";;
-13) m="Upgrading firmware with JFFS enabled is not possible.";;
+13) m="Upgrading firmware with JFFS enabled is not possible. Optionally you can enable 'Unmount JFFS during upgrade' in the webUI in 'Administration > Admin Access'";;
 14) m="Backup is missing. Settings restoration is not possible.";;
 15) e=5; m="Operation cancelled.";;
 16) m="Can't fetch newest version number from freshtomato.org.";;
@@ -82,6 +94,11 @@ case $1 in
 22) m="Firmware informations doesn't match the router informations. Make sure you are using the right firmware for your device or try to upgrade without option '-y'.";;
 23) m="Unable to fetch changelog data from GitHub.";;
 24) m="Cannot use JFFS partition for upgrades. JFFS cannot get unmounted while still working from the '/jffs' directory.";;
+25) m="Invalid version number. Version must be e.g. 2025.2";;
+26) m="Invalid build type. Build must be e.g. Mini, Max, VPN, AIO, etc.";;
+27) m="Unable to fetch firmware list.";;
+28) m="No firmware match.";;
+29) m="Router identification not accurate enough.";;
 esac
 ilog $e "$m"
 kill $(jobs -p) &>/dev/null
@@ -120,43 +137,200 @@ done
 }
 
 id() {
-echo "$FULLMODEL" | grep -qi "Cisco Linksys" && MAKE="Linksys" || MAKE="$(echo "$FULLMODEL" | awk '{print $1}')"
+MATCH=""
+TARGETS="/tmp/targets_${CPU}.csv"
+yget -q --no-check-certificate -O "$TARGETS" "https://github.com/HommeOursPorc/ftup/raw/refs/heads/main/targets_${CPU}.csv"
+[ -s "$TARGETS" ] && {
+    ACCURACY=25
+    [ $(grep -wc "$FULLMODEL" "$TARGETS") -eq 1 ] && { ACCURACY=50 ; MATCH="$(grep -w "$FULLMODEL" "$TARGETS" | awk -F',' '{print $1}')" ; }
+}
+rm -f "$TARGETS"
+echo "$FULLMODEL" | grep -qi "Cisco Linksys" && MAKE="Cisco Linksys" || MAKE="$(echo "$FULLMODEL" | awk '{print $1}')"
 TMODEL="$(echo "$FULLMODEL" | awk '{if(NF>=3){{print $(NF-1)"_"$NF}}else{{print $NF}}}' | tr -d "/")"
 FIX="$(NG t_fix1)"
 ID="$(NG odmpid)"
 [ "$FIX" == "$TMODEL" ] && MODEL="$FIX" || { [ "$ID" != "" ] && MODEL="$ID" || MODEL="$FIX" ; }
+[ "$MATCH" != "" ] && { [ "$MATCH" == "$MODEL" ] && ACCURACY=100 || MODEL="$MATCH" ; }
 SDK="$(echo "$OSVER" | awk '{ for(i=1; i<=NF; i++) { if(match($i, /^K+/)) { print $i; break; } } }')" # eg K26ARM
-VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
 [ "$CPU" == "mips" ] && {
+    MIPSREV="$(echo "$SDK" | cut -d "_" -f1 | sed "s/K26//i")"
     SDK="$(echo "$SDK" | cut -d "_" -f2)"
     NVRAM="$(nvram show | grep "entries,.*bytes" | awk '{print ($3+$6)/1024}')K"
 } || {
     NVRAM="$(nvram show 2>&1 >/dev/null | tr -d "()" | awk '{print ($2+$4)/1024}')K"
 }
+case "$SDK" in
+    RTAC) SDKFULL="K26RT-AC";;
+    RTN ) SDKFULL="K26RT-N";;
+    RT  ) SDKFULL="K26";;
+    *   ) SDKFULL="$SDK";;
+esac
+VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
 }
 
 id_show() {
 id
-case "$SDK" in
-    RTAC) SDK="K26RT-AC";;
-    RTN ) SDK="K26RT-N";;
-    RT  ) SDK="K26";;
-esac
 echo "
 $FULLMODEL
 FreshTomato $OSVER
 
        MAKE = $MAKE
       MODEL = $MODEL
-        CPU = $(echo $CPU | awk '{print toupper($0)}')
-        SDK = $SDK
+        CPU = $([ "$MIPSREV" != "" ] && echo "$MIPSREV" || echo "ARM")
+        SDK = $SDKFULL    $([ $USB -eq 1 ] && printf "\n        USB = YES")
       NVRAM = $NVRAM
- FT Version = $CURVER
-  Variation = $VAR
+      BUILD = $VAR
+    VERSION = $CURVER
 
+MODEL Accuracy = $(
+    case "$ACCURACY" in
+        100) echo "HIGH -- Matched online";;
+         50) echo "MEDIUM -- Partial match";;
+         25) echo "LOW -- No match (possible \"unnamed\" firmware)";;
+          0) echo "POOR -- Best effort";;
+    esac
+)
 
 Please report any incorrect results at
 https://www.linksysinfo.org/index.php?threads/freshtomato-upgrade-script-v0-11.78326/
+"
+}
+
+fw_list() {
+# $1 == version/build
+VER=""
+BUILD=""
+SED="\(BTgui-VPN\|BT-VPN\|BT\|Big-VPN\|Nocat-VPN\|Mega-VPN\|IPv6-VPN\|AIO_Lite\|AIO\|Custom\|MiniIPv6\|MiniVPN2\|MiniVPN\|Mini\|Max\|VPN\)"
+GREP=$(echo "$SED" | tr -d "\\()" | tr "|" "\n")
+URL="https://freshtomato.org/downloads/freshtomato-${CPU}"
+NODE=""
+TMPLIST="/tmp/tmplist.txt"
+FWLIST="/tmp/fwlist.txt"
+id
+[ $ACCURACY -eq 0 ] && error 29
+[ $ACCURACY -eq 25 ] && [ "$CPU" == "arm" -o "$SDK" == "RTAC" ] && error 29
+[ $# -eq 1 ] && {
+    [ $(echo "$1" | grep -c '/') -eq 1 ] && {
+        VER="$(echo "$1" | awk -F'/' '{print $1}')"
+        BUILD="$(echo "$1" | awk -F'/' '{print $2}')"
+    } || {
+        [ $(echo "$1" | grep -cE '20[0-9][0-9]\.[0-9]($|[0-9]$)') -eq 1 ] && VER="$1" || BUILD="$1"
+    }
+}
+[ "$VER" == "" ] && { check_update -q ; VER="$LATESTVER" ; }
+[ $(echo "$VER" | grep -cE '20[0-9][0-9]\.[0-9]($|[0-9]$)') -ne 1 ] && error 25
+YEAR="${VER%.*}"
+[ $LIST -eq 1 ] && {
+    BUILD="$(echo "$VAR" | sed "s/$SED/\.\*/i")"
+} || {
+    [ "$BUILD" == "" ] && {
+        BUILD="$VAR"
+    } || {
+        [ $(printf "$GREP" | grep -cix "$BUILD") -eq 0 ] && error 26
+        BUILD="$(echo "$VAR" | sed "s/$SED/$BUILD/i")"
+    }
+}
+URL="${URL}/${YEAR}/${VER}"
+[ "$CPU" == "arm" ] && {
+    NODE="$(basename "$URL")"
+} || {
+    URL="${URL}/${SDKFULL}"
+    NODE="$(basename "$URL")"
+}
+yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NODE\/\)//g;s/\".*//g" | tr -d "/" | grep "^freshtomato" | awk -v var="$URL" '{print var"/"$0}' > "$TMPLIST"
+[ "$SDK" == "RTN" ] && {
+    URL="${URL}/Asus%20RT-Nxx%20%26%20CO"
+    NODE="$(basename "$URL")"
+    yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NODE\/\)//g;s/\".*//g" | tr -d "/" | grep "^freshtomato" | awk -v var="$URL" '{print var"/"$0}' >> "$TMPLIST"
+}
+[ ! -s "$TMPLIST" ] && error 27
+[ $ACCURACY -ge 50 ] && {
+    # Named
+    grep -qi "$MODEL.*$BUILD" "$TMPLIST" || error 28
+    grep -wi "$MODEL.*$BUILD" "$TMPLIST" > "$FWLIST"
+} || {
+    # Unnamed
+    PATTERN="freshtomato-K26"
+    SPECIAL=0
+    if [ "$MIPSREV" == "MIPSR1" -a $USB -eq 0 ]; then
+        PATTERN="${PATTERN}MIPSR1_$SDK"
+    elif [ "$MIPSREV" == "MIPSR1" -a $USB -eq 1 ]; then
+        PATTERN="${PATTERN}MIPSR1_$SDK-USB"
+    elif [ $(echo "$VAR" | grep -ci "K$") -eq 1 ]; then
+        PATTERN="${PATTERN}MIPSR2_$SDK-USB"
+        SPECIAL=1
+    elif [ "$MIPSREV" == "MIPSR2" -a $USB -eq 0 ]; then
+        PATTERN="${PATTERN}MIPSR2_$SDK-NVRAM$NVRAM"
+    elif [ "$MIPSREV" == "MIPSR2" -a $USB -eq 1 ]; then
+        PATTERN="${PATTERN}MIPSR2_$SDK-USB-NVRAM$NVRAM"
+    fi
+    PATTERN="$PATTERN-$VER-$BUILD"
+    [ $SPECIAL -eq 0 ] && {
+        grep -wi "$PATTERN" "$TMPLIST" > "$FWLIST"
+    } || {
+        sed "s/\.zip//g" "$TMPLIST" | grep "K$" | grep -wi "$PATTERN" > "$FWLIST"
+    }
+}
+rm -f "$TMPLIST"
+[ ! -s "$FWLIST" ] && error 28
+[ $LIST -eq 0 -a $(wc -l "$FWLIST" | awk '{print $1}') -ne 1 ] && error 28 || return 0
+}
+
+fw_get() {
+# $1 == version/build
+[ $# -eq 1 ] && ARGS="$1" || ARGS=""
+FWLIST="/tmp/fwlist.txt"
+[ $AUTOYES -eq 1 ] && { echo "Full auto upgrades are currently disabled until this feature is proven to be working perfectly." ; error 15 ; }
+[ $AUTOUP -eq 1 ] && {
+    check_update -q
+    [ $CANUP -eq 0 ] && { printf "\nNo upgrade available.\n\n" ; exit 0 ; } || ARGS="$LATESTVER"
+}
+echo -e "\n
+This feature is experimental. Use with caution.
+Double check that it output the right firmware before upgrading.
+I am not responsible for any bricked device.
+"
+[ "$ARGS" != "" ] && fw_list "$ARGS" || fw_list
+FWURL="$(cat "$FWLIST")"
+get_filename
+echo -e "USE WITH CAUTION!
+
+$FULLMODEL
+FreshTomato $OSVER
+$([ $CANUP -eq 1 ] && printf "%s" "\nNew version $LATESTVER is available.\n\n")
+Upgrade with this firmware?
+$FWURL
+"
+#[ $AUTOYES -eq 1 ] && {
+#    printf "\n\nTo cancel press CTRL+C\n\n"
+#    wait_loop 10 "Download starting in"
+#} || {
+    printf "$MSG"
+    read ANSWER ; echo
+    [ "$ANSWER" != "yes" ] && error 15
+#}
+}
+
+fw_show() {
+# $1 == version
+LIST=1
+FWLIST="/tmp/fwlist.txt"
+echo -e "
+This feature is experimental. Use with caution.
+Double check that it list the right firmware before upgrading.
+I am not responsible for any bricked device.
+"
+[ $# -eq 1 ] && fw_list "$1" || fw_list
+echo -e "$FULLMODEL
+FreshTomato $OSVER
+$([ $CANUP -eq 1 ] && printf "%s" "\nNew version '$LATESTVER' is available.\n\n")
+Available firmware:
+$(for f in $(cat "$FWLIST"); do basename "$f"; done)
+
+Firmware can be found here:
+$(dirname $(head -n1 "$FWLIST"))
+
+USE WITH CAUTION!
 "
 }
 
@@ -169,11 +343,21 @@ rm -f /tmp/ftup_cl.txt
 }
 
 check_update() {
+# $1 == Quiet/Silent
+SILENT=0
+[ $# -eq 1 ] && { [ "$1" == "-q" ] && SILENT=1 ; }
 LATESTVER="$(yget -q --no-check-certificate -O- "http://freshtomato.org/version.txt")"
 [ "$LATESTVER" == "" ] && error 16
-echo "Current version = $CURVER
+MAJ="${CURVER%.*}"
+MIN="${CURVER##*.}"
+LMAJ="${LATESTVER%.*}"
+LMIN="${LATESTVER##*.}"
+UP=0
+[ $SILENT -eq 0 ] && echo "Current version = $CURVER
 Latest  version = $LATESTVER"
-[ $(echo $LATESTVER | tr -d ".") -gt $(echo $CURVER | tr -d ".") ] && echo -e "UPDATE AVAILABLE!"
+[ $LMAJ -gt $MAJ ] && UP=1
+[ $LMAJ -eq $MAJ -a $LMIN -gt $MIN ] && UP=1
+[ $UP -eq 1 ] && { CANUP=1 ; [ $SILENT -eq 0 ] && echo "UPDATE AVAILABLE!" ; }
 }
 
 enough_memory() {
@@ -182,6 +366,13 @@ enough_memory() {
 # enoughmem=1 --> yes (proceed)
 AVAIL=$(awk '/MemFree/ {print $2}' /proc/meminfo)
 [ $1 -ge $AVAIL ] && echo 0 || echo 1
+}
+
+get_filename() {
+filename="$(basename "$FWURL")"
+extension="${filename##*.}"
+[ "$extension" != "zip" -a "$extension" != "trx" -a "$extension" != "bin" -a "$extension" != "chk" ] && error 6
+[ "$extension" == "zip" ] && ISZIP=1
 }
 
 download() {
@@ -264,16 +455,18 @@ prep_file() {
 }
 
 # check if right firmware if possible
-id
+[ "$MODEL" == "" ] && id
 WARN=""
+WMSG="doesn't match the one stated in the firmware name"
 fwname="$(basename "$FWPATH")"
 [ "$CPU" == "arm" -a "$MODEL" != "R1D" ] && {
     [ "$(tail -n1 "$FWPATH" | strings | tail -n1)" != "$MODEL" ] && WARN="WARNING: Model name $MODEL NOT found inside the firmware file footer.\n"
 }
-[ $(echo "$fwname" | grep -c "$SDK") -ne 1 ] && WARN="${WARN}WARNING: Router SDK (${SDK}) doesn't match the one stated in the firmware name.\n"
+[ $ACCURACY -ge 50 ] && { [ $(echo "$fwname" | grep -ci "$MODEL") -ne 1 ] && WARN="${WARN}WARNING: Router Model (${MODEL}) ${WMSG}.\n" ; }
+[ $(echo "$fwname" | grep -ci "$SDK") -ne 1 ] && WARN="${WARN}WARNING: Router SDK (${SDK}) ${WMSG}.\n"
 nvsize="$(echo "$fwname" | grep -Eo "(|[1-9])[1-9][1-9]K")"
-[ "$nvsize" != "$NVRAM" ] && WARN="${WARN}WARNING: NVRAM size (${NVRAM}) doesn't match with the size stated in the firmware name (${nvsize}).\n"
-# check for mips r1 vs r2 ???
+[ "$nvsize" != "$NVRAM" ] && WARN="${WARN}WARNING: NVRAM size (${NVRAM}) ${WMSG} (${nvsize}).\n"
+[ "$CPU" == "mips" -a $(echo "$fwname" | grep -ci "$MIPSREV") -ne 1 ] && WARN="${WARN}WARNING: MIPS version (${MIPSREV}) ${WMSG}.\n"
 [ "$WARN" != "" ] && {
     printf "\n$WARN"
     [ $AUTOYES -eq 1 ] && error 22
@@ -292,7 +485,6 @@ ilog 5 "Backup created successfully: $AUTORUN"
 }
 
 handle_jffs() {
-JFFS=1
 pwd | grep -q "^/jffs" && error 24
 pwd -P | grep -q "^/jffs" && error 24
 dirname "$0" | grep -q "^/jffs" && error 24
@@ -325,6 +517,7 @@ WARNING: JFFS is enabled.
         }
     }
 printf "Stopping JFFS... "
+[ $(ps | grep -c "[j]ffs.*gcd") -eq 0 -a $(lsmod | grep -c "jffs") -eq 0 ] && { printf "Done\n" ; return 0 ; }
 sync && sleep 2
 kill_jffs
 service jffs stop &>/dev/null
@@ -354,7 +547,6 @@ c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne
 
 upgrade() {
 # Write firmware file
-ilog 6 "Writing firmware $fwname"
 [ -e "${WORKDIR}/ftup.out" ] && rm -f ${WORKDIR}/ftup.out
 [ "$CPU" == "arm" ] && {
     nohup mtd-write2 ${FWPATH} linux > ${WORKDIR}/ftup.out 2>/dev/null &
@@ -406,6 +598,10 @@ MSG="To continue type [yes], to cancel type [n]: "
 OPTIONS=""
 MODE=""
 FAIL=0
+AUTOUP=0
+GETFW=0
+SETFW=0
+GETFWARG=""
 REMOTE=0
 OFFICIAL=0
 FORCEZIP=0
@@ -428,43 +624,54 @@ fwname=""
 ISZIP=0
 TMPFS=0
 [ "$(uname -m)" == "mips" ] && CPU="mips" || CPU="arm"
+MIPSREV=""
 OSVER="$(NG os_version)"
 CURVER="$(echo "$OSVER" | awk '{print $1}')" # eg 2023.3
+LATESTVER=""
+CANUP=0
 FULLMODEL="$(NG t_model_name)"
 MAKE=""
 MODEL=""
+ACCURACY=0
+echo "$OSVER" | grep -qi usb && USB=1 || USB=0
 SDK=""
+SDKFULL=""
 VAR=""
 NVRAM=""
-JFFS=0
+[ $(NG jffs2_on) -eq 1 ] && JFFS=1 || JFFS=0
+LIST=0
 
 
 # Check and set arguments
 [ $# -eq 0 ] && { help; exit 0; }
 [ $# -eq 1 ] && { [ "$1" == "help" -o "$1" == "-h" -o "$1" == "--help" ] && { help; exit 0; } }
 [ $# -eq 1 ] && { printf "%s" "$1" | grep -q "^--" && {
-    GOTO=0
     case $1 in
-        --changelog)    changelog ;;
-        --check)        check_update ;;
-        --erase-nvram)  ERASE=1 ; GOTO=1 ;;
-        --id)           id_show ;;
-        *)              GOTO=1 ;;
+        --changelog)      changelog ; exit 0 ;;
+        --check)          check_update ; exit 0 ;;
+        --erase-nvram)    ERASE=1 ;;
+        --id)             id_show ; exit 0 ;;
+        --list-firmware)  fw_show ; exit 0 ;;
     esac
-    [ $GOTO -eq 0 ] && exit 0
     }
 }
+[ $# -eq 2 -a "$1" == "--list-firmware" ] && { fw_show "$2" ; exit 0 ; }
 [ $ERASE -eq 0 ] && {
 for a in "$@"; do
+    [ $SETFW -eq 1 ] && { SETFW=0 ; printf "%s" "$a" | grep -qv "^-" && { GETFWARG="$a" ; continue ; } }
+    printf "%s" "$a" | grep -q "^--" && error 1
     printf "%s" "$a" | grep -q "^-" && {
-        a="$(printf "%s" "$a" | tr -d "-")"
+        printf "%s" "$a" | grep -qE "g.*d|d.*g" && error 2
+        a="$(printf "%s" "$a" | cut -c 2-)"
         [ "$a" == "" ] && error 1
         OPTIONS="$(printf "%s" "$a" | grep -o . )"
         for o in $OPTIONS; do
             case $o in
+                a) [ $AUTOUP     -eq 0 ] && AUTOUP=1     || error 2 ;;
                 c) [ "$MODE"     == "" ] && MODE="clean" || error 2 ;;
                 d) [ "$DLDIR"    == "" ] && { DLDIR=1 ; SETDIR=1 ; }         || error 2 ;;
                 f) [ $FORCEFLY   -eq 0 ] && FORCEFLY=1   || error 2 ;;
+                g) [ $GETFW      -eq 0 ] && { GETFW=1 ; SETFW=1  ; }         || error 2 ;;
                 n) [ "$NOCHECK"  == "" ] && NOCHECK="--no-check-certificate" || error 2 ;;
                 o) [ $ONLY       -eq 0 ] && ONLY=1       || error 2 ;;
                 r) [ $RESTORE    -eq 0 ] && RESTORE=1    || error 2 ;;
@@ -485,12 +692,15 @@ for a in "$@"; do
     }
 done
 }
-[ $ERASE -eq 0 -a "$FWURL" == "" ] && error 3
+[ $SETDIR -eq 1 ] && error 17
+[ $AUTOUP -eq 1 -a $GETFW -eq 1 ] && error 2
+[ $AUTOUP -eq 1 -a $ONLY  -eq 1 ] && error 2
+#[ $AUTOUP -eq 1 ] && AUTOYES=1
+[ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$FWURL" != "" ] && error 2 ; }
+[ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { REMOTE=1 ; OFFICIAL=1 ; ISZIP=1 ; }
+[ $AUTOUP -eq 0 -a $GETFW -eq 0 -a $ERASE -eq 0 -a "$FWURL" == "" ] && error 3
 [ "$FWURL" != "" ] && {
-    filename="$(basename "$FWURL")"
-    extension="${filename##*.}"
-    [ "$extension" != "zip" -a "$extension" != "trx" -a "$extension" != "bin" -a "$extension" != "chk" ] && error 6
-    [ "$extension" == "zip" ] && ISZIP=1
+    get_filename
     [ $REMOTE -eq 0 ] && { [ ! -s "$FWURL" ] && error 9 ; }
 }
 [ "$DLDIR" != "" ] && { case "$DLDIR" in ./) DLDIR="." ;; ../) DLDIR=".." ;; esac ; }
@@ -499,7 +709,8 @@ done
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 0 ] && error 19
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 1 -a $ISZIP -eq 0 ] && error 18
 [ ! -d "$WORKDIR" -a $ERASE  -eq 0 ] && mkdir "$WORKDIR"
-[ $ONLY -eq 1 ] && { [ "$MODE" == "" -a $RESTORE -eq 0 -a $AUTOYES -eq 0 ] && { [ $REMOTE -eq 1 ] && { download ; exit 0 ; } || error 21 ; } || error 2 ; }
+[ $ONLY -eq 1 ] && { [ "$MODE" != "" -o $RESTORE -eq 1 -o $AUTOYES -eq 1 ] && error 2 ; }
+[ $ONLY -eq 1 -a $REMOTE -eq 0 ] && error 21
 [ "$MODE"   == "" ] && { [ $RESTORE -eq 1 ] && MODE="clean" || MODE="dirty"; }
 [ $RESTORE  -eq 1 ] && {
     [ $(mount | grep -q /mnt ; echo $?) -ne 0 ] && error 4
@@ -518,8 +729,11 @@ done
     { prepare_upgrade ; erase_nvram ; rboot ; } &
     wait
 } || {
-    [ $(NG jffs2_on) -eq 1 ] && handle_jffs
+    [ $ONLY -eq 0 -a $JFFS -eq 1 ] && handle_jffs
+    [ $GETFW -eq 1 -a "$GETFWARG" != "" ] && fw_get "$GETFWARG"
+    [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$GETFWARG" == "" ] && fw_get ; }
     [ $REMOTE -eq 1 ] && download
+    [ $ONLY -eq 1 ] && exit 0
     prep_file
     printf "\n\n                POINT OF NO RETURN\n\n"
     printf "Make sure you are using the right firmware before proceeding!\n\n"
