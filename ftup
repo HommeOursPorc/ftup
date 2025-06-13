@@ -7,8 +7,8 @@ NG() { nvram get "$1" ; } # for backward compatibility
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2025-04-28
-ver="v0.50"
+# Last update == 2025-06-13
+ver="v0.51"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver
@@ -380,7 +380,7 @@ download() {
 [ "$DLDIR" != "" ] && DESTDIR="$DLDIR" || DESTDIR="$WORKDIR"
 [ "$(df -P "$DESTDIR" | tail -n1 | awk '{print $1}')" == "tmpfs" ] && TMPFS=1
 yget -qS --spider $NOCHECK "$FWURL" 2>"${WORKDIR}/yget.out"
-[ $? -eq 0 -a $(grep -ci "content-length" "${WORKDIR}/yget.out") -eq 1 ] && FWSIZE=$((($(awk 'tolower($0) ~ /content-length/ {print $2}' "${WORKDIR}/yget.out")/1024)*3))
+[ $? -eq 0 -a $(grep -ci "content-length" "${WORKDIR}/yget.out") -gt 0 ] && FWSIZE=$((($(grep -i "content-length" "${WORKDIR}/yget.out" | awk 'NR==1 {max = $2} NR > 1 {if ($2 > max) max = $2} END {print max}')/1024)*3))
 rm -f "${WORKDIR}/yget.out"
 [ $ISZIP -eq 1 -a $TMPFS -eq 1 -a $FORCEZIP -eq 0 -a $FORCEFLY -eq 0 -a $FWSIZE -gt 0 ] && [ $(enough_memory $FWSIZE) -eq 1 ] && FORCEZIP=1
 echo "Starting download..."
