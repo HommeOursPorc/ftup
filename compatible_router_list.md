@@ -1,0 +1,109 @@
+List of routers confirmed to be compatible
+with the script identification function.
+
+- [ ] ASUS DSL‑AC68U
+- [ ] ASUS RT‑AC1750
+- [ ] ASUS RT‑AC1900P
+- [ ] ASUS RT‑AC1900U
+- [ ] ASUS RT‑AC3100
+- [x] ASUS RT‑AC3200
+- [ ] ASUS RT‑AC5300
+- [ ] ASUS RT‑AC56S
+- [ ] ASUS RT‑AC56U/R
+- [ ] ASUS RT‑AC66U
+- [x] ASUS RT‑AC66U_B1
+- [ ] ASUS RT‑AC67U
+- [x] ASUS RT‑AC68U
+- [ ] ASUS RT‑AC68U/R/P/W
+- [ ] ASUS RT‑AC88U
+- [ ] ASUS RT‑N10P
+- [x] ASUS RT‑N10U
+- [ ] ASUS RT‑N12
+- [ ] ASUS RT‑N12HP
+- [ ] ASUS RT‑N12K
+- [ ] ASUS RT‑N12VP
+- [ ] ASUS RT‑N15U
+- [ ] ASUS RT‑N16
+- [ ] ASUS RT‑N18U
+- [ ] ASUS RT‑N53
+- [ ] ASUS RT‑N66U
+- [ ] ASUS TUF‑AX3000
+- [ ] ASUS WL‑330gE
+- [ ] ASUS WL‑500GP
+- [ ] ASUS WL‑500W
+- [ ] ASUS WL‑520GU
+- [ ] Belkin F5D8235
+- [ ] Belkin F7D3301/7301
+- [ ] Belkin F7D3302/7302
+- [ ] Belkin F7D4302/8302
+- [ ] Belkin F9K1102
+- [ ] Belkin F9K1113
+- [ ] Buffalo WHR‑G125
+- [ ] Buffalo WHR‑G54S
+- [ ] Buffalo WHR‑HP‑G54
+- [ ] Buffalo WZR‑1750DHP
+- [ ] Buffalo WZR‑D1800H
+- [ ] CD-R King CW‑5358U
+- [ ] Cisco M10
+- [ ] D-Link DIR‑320
+- [ ] D-Link DIR‑620
+- [ ] D-Link DIR‑865L
+- [ ] D-Link DIR‑868L
+- [ ] Fiboom HG320
+- [ ] Huawei WS880
+- [ ] Linksys E1000
+- [ ] Linksys E1200
+- [ ] Linksys E1500
+- [ ] Linksys E1550
+- [ ] Linksys E2000
+- [ ] Linksys E2500
+- [ ] Linksys E3000
+- [ ] Linksys E3200
+- [ ] Linksys E4200
+- [ ] Linksys E800
+- [ ] Linksys E900
+- [ ] Linksys EA6200
+- [ ] Linksys EA6300
+- [ ] Linksys EA6350
+- [ ] Linksys EA6400
+- [ ] Linksys EA6500
+- [x] Linksys EA6700
+- [ ] Linksys EA6900
+- [ ] Linksys WRT160N
+- [ ] Linksys WRT300N
+- [ ] Linksys WRT310N
+- [ ] Linksys WRT320N
+- [ ] Linksys WRT54G/GS
+- [ ] Linksys WRT54GL
+- [ ] Linksys WRT610N
+- [ ] Linksys WRTSL54GS
+- [ ] Netgear AC1450
+- [ ] Netgear EX6200
+- [ ] Netgear EX7000
+- [ ] Netgear R6200
+- [ ] Netgear R6250
+- [ ] Netgear R6300
+- [ ] Netgear R6400
+- [ ] Netgear R6700
+- [ ] Netgear R6900
+- [ ] Netgear R7000
+- [ ] Netgear R7900
+- [ ] Netgear R8000
+- [ ] Netgear WNDR3400
+- [ ] Netgear WNDR3700
+- [ ] Netgear WNDR4000
+- [ ] Netgear WNDR4500
+- [ ] Netgear WNR2000
+- [ ] Netgear WNR3500
+- [ ] Netgear WNR3500L
+- [ ] Netgear XR300
+- [ ] Ovislink WL1600GL
+- [ ] Tenda AC15
+- [ ] Tenda AC18
+- [ ] Tenda N6
+- [ ] Tenda N60
+- [ ] Tenda N80
+- [ ] Tenda W1800R
+- [ ] Xiaomi MiWiFi R1D
+- [ ] ZTE H218N
+- [ ] ZTE ZXV10 H618B
