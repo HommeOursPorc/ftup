@@ -4,14 +4,16 @@ USERAGENT="Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/109.0
 alias yget="/usr/bin/wget -T 15 -U \"$USERAGENT\" --header \"Cache-Control: no-cache\""
 #. nvram_ops # for future use
 NG() { nvram get "$1" ; } # for backward compatibility
+ctrl_c() { kill -9 $(jobs -p) &>/dev/null ; echo ; [ $FAIL -eq 0 ] && error 15 || exit 15 ; }
+trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-# Last update == 2025-06-13
-ver="v0.51"
+ver="v0.52"
+last_up="(2026-01-16)"
 
 help() {
-echo -e "FreshTomato Upgrade Script $ver
+echo -e "FreshTomato Upgrade Script $ver $last_up
 
 Usage: ftup [options] [firmware path or URL]
 
@@ -21,9 +23,9 @@ Single option:
   --changelog      Print latest FreshTomato changelog.
   --check          Print latest FreshTomato version number.
   --erase-nvram    Erase all data in NVRAM memory (thorough).
+  --help           Show this message.
   --id             Identify device.
-  --list-firmware  Experimental: List available firmware.
-                   Default: Latest version.
+  --list-firmware  List available firmware.
                    Optional: Specify version to list,
                    e.g. --list-firmware 2025.2
 
@@ -101,8 +103,9 @@ case $1 in
 29) m="Router identification not accurate enough.";;
 esac
 ilog $e "$m"
-kill $(jobs -p) &>/dev/null
-rm -f ${WORKDIR}/*
+kill -9 $(jobs -p) &>/dev/null
+sleep 1
+rm -f "${WORKDIR}/*"
 exit $1
 }
 
@@ -120,11 +123,6 @@ logger -p $1 -t $(basename "$0")[$$] "$2"
 [ $1 -le 4 ] && echo -e "\n$e: $2\n" || echo "$2"
 }
 
-ctrl_c() {
-kill $(jobs -p) &>/dev/null
-echo; error 15
-}
-
 wait_loop() {
 # $1 = wait time in seconds
 # $2 = msg to print
@@ -138,7 +136,7 @@ done
 
 id() {
 MATCH=""
-TARGETS="/tmp/targets_${CPU}.csv"
+TARGETS="${WORKDIR}/targets_${CPU}.csv"
 yget -q --no-check-certificate -O "$TARGETS" "https://github.com/HommeOursPorc/ftup/raw/refs/heads/main/targets_${CPU}.csv"
 [ -s "$TARGETS" ] && {
     ACCURACY=25
@@ -182,11 +180,11 @@ FreshTomato $OSVER
       BUILD = $VAR
     VERSION = $CURVER
 
-MODEL Accuracy = $(
+Firmware Accuracy = $(
     case "$ACCURACY" in
         100) echo "HIGH -- Matched online";;
-         50) echo "MEDIUM -- Partial match";;
-         25) echo "LOW -- No match (possible \"unnamed\" firmware)";;
+         50) echo "MEDIUM -- Partial match (for dev: id algo did not match)";;
+         25) echo "LOW -- No online match (possible with MIPS devices)";;
           0) echo "POOR -- Best effort";;
     esac
 )
@@ -204,8 +202,8 @@ SED="\(BTgui-VPN\|BT-VPN\|BT\|Big-VPN\|Nocat-VPN\|Mega-VPN\|IPv6-VPN\|AIO_Lite\|
 GREP=$(echo "$SED" | tr -d "\\()" | tr "|" "\n")
 URL="https://freshtomato.org/downloads/freshtomato-${CPU}"
 NODE=""
-TMPLIST="/tmp/tmplist.txt"
-FWLIST="/tmp/fwlist.txt"
+TMPLIST="${WORKDIR}/tmplist.txt"
+FWLIST="${WORKDIR}/fwlist.txt"
 id
 [ $ACCURACY -eq 0 ] && error 29
 [ $ACCURACY -eq 25 ] && [ "$CPU" == "arm" -o "$SDK" == "RTAC" ] && error 29
@@ -279,7 +277,7 @@ rm -f "$TMPLIST"
 fw_get() {
 # $1 == version/build
 [ $# -eq 1 ] && ARGS="$1" || ARGS=""
-FWLIST="/tmp/fwlist.txt"
+FWLIST="${WORKDIR}/fwlist.txt"
 [ $AUTOYES -eq 1 ] && { echo "Full auto upgrades are currently disabled until this feature is proven to be working perfectly." ; error 15 ; }
 [ $AUTOUP -eq 1 ] && {
     check_update -q
@@ -314,7 +312,7 @@ $FWURL
 fw_show() {
 # $1 == version
 LIST=1
-FWLIST="/tmp/fwlist.txt"
+FWLIST="${WORKDIR}/fwlist.txt"
 echo -e "
 This feature is experimental. Use with caution.
 Double check that it list the right firmware before upgrading.
@@ -336,10 +334,10 @@ USE WITH CAUTION!
 
 changelog() {
 echo "Getting changelog from https://github.com/FreshTomato-Project ..."
-yget -q --no-check-certificate -O /tmp/ftup_cl.txt "https://github.com/FreshTomato-Project/freshtomato-${CPU}/raw/refs/heads/${CPU}-master/CHANGELOG"
+yget -q --no-check-certificate -O ${WORKDIR}/ftup_cl.txt "https://github.com/FreshTomato-Project/freshtomato-${CPU}/raw/refs/heads/${CPU}-master/CHANGELOG"
 [ $? -ne 0 ] && error 23
-echo -e "YOUR VERSION = $CURVER\nTO QUIT PRESS 'Q'\n\n$(cat /tmp/ftup_cl.txt)" | less
-rm -f /tmp/ftup_cl.txt
+echo -e "YOUR VERSION = $CURVER\nTO QUIT PRESS 'Q'\n\n$(cat ${WORKDIR}/ftup_cl.txt)" | less
+rm -f ${WORKDIR}/ftup_cl.txt
 }
 
 check_update() {
@@ -555,45 +553,46 @@ upgrade() {
     nohup mtd-write -w -i ${FWPATH} -d linux > ${WORKDIR}/ftup.out 2>/dev/null &
     MTD="mtd-write"
 }
-c=0; until [ "$(pidof "$MTD")" ];do c=$((c+1)); [ $c -le 21 ] && { echo -ne "Please wait... $c\033[0K\r"; usleep 500000; } || break ; done
+c=0; until [ "$(pidof "$MTD")" ];do c=$((c+1)); [ $c -le 60 ] && { echo -ne "Please wait... $c\033[0K\r"; usleep 500000; } || break ; done
 c=0; while [ "$(pidof "$MTD")" ];do c=$((c+1)); echo -ne "Writing firmware... $c\033[0K\r";sleep 1;done; printf "Writing firmware... Done\n"
-sleep 2
+sleep 3
 
 # Check if flash successful
 [ ! -s "${WORKDIR}/ftup.out" ] && {
     ilog 3 "Writing of ${fwname} unsuccessful!!"
-    FAIL=1
+    echo 1 > ${WORKDIR}/ftup.fail
     [ $RESTORE -eq 1 ] && {
         NOMORE="restore.$(date '+%Y%m%d_%H%M%S')"
         mv -f "$AUTORUN" "$(dirname "$AUTORUN")/$NOMORE"
         ilog 6 "Auto settings restoration cancelled, restore.autorun was renamed $NOMORE"
     }
-    echo -e "\nSomething went wrong. The router is NOT upgraded. The router will reboot.\n"
-    echo -e "To cancel the reboot and retry the upgrade manually press 'Ctrl+C'\n"
-    wait_loop 10 "Rebooting in"
-    rboot
+    return 1
 }
 echo "mtd-write: $(cat ${WORKDIR}/ftup.out | sort -u)"
-rm -f ${WORKDIR}/ftup.out
 ilog 6 "Successfully flashed $fwname"
+return 0
 }
 
 erase_nvram() {
 ilog 6 "Erasing nvram"
 [ "$CPU" == "arm" ] && mtd-erase2 nvram || mtd-erase -d nvram
-sleep 2
+sleep 3
 }
 
 rboot() {
-[ $RESTORE -eq 1 -a $FAIL -eq 0 ] && ilog 6 "Your router will reboot twice to restore its settings. Please be patient."
+[ $RESTORE -eq 1 -a ! -s "${WORKDIR}/ftup.fail" ] && ilog 6 "Your router will reboot twice to restore its settings. Please be patient."
 sync
-/sbin/reboot && kill -9 $PPID
-exit
+sleep 3
+/sbin/reboot && kill -9 $SSH &>/dev/null
+kill -9 $(jobs -p) &>/dev/null
+sleep 3
+exit 0
 }
 
 
 # Global Variables
 WORKDIR="/tmp/ftupwd"
+[ ! -d "$WORKDIR" ] && mkdir "$WORKDIR" || find "${WORKDIR}/*" ! -name "." ! -name "*.trx" ! -name "*.zip" -exec rm -f {} \; &>/dev/null
 MSG="To continue type [yes], to cancel type [n]: "
 OPTIONS=""
 MODE=""
@@ -640,19 +639,23 @@ VAR=""
 NVRAM=""
 [ $(NG jffs2_on) -eq 1 ] && JFFS=1 || JFFS=0
 LIST=0
+SSH=$PPID
 
 
 # Check and set arguments
 [ $# -eq 0 ] && { help; exit 0; }
-[ $# -eq 1 ] && { [ "$1" == "help" -o "$1" == "-h" -o "$1" == "--help" ] && { help; exit 0; } }
 [ $# -eq 1 ] && { printf "%s" "$1" | grep -q "^--" && {
+    q=1
     case $1 in
-        --changelog)      changelog ; exit 0 ;;
-        --check)          check_update ; exit 0 ;;
-        --erase-nvram)    ERASE=1 ;;
-        --id)             id_show ; exit 0 ;;
-        --list-firmware)  fw_show ; exit 0 ;;
+        --changelog)      changelog ;;
+        --check)          check_update ;;
+        --erase-nvram)    ERASE=1 ; q=0 ;;
+        --help)           help ;;
+        --id)             id_show ;;
+        --list-firmware)  fw_show ;;
+        *)                error 1 ;;
     esac
+    [ $q -eq 1 ] && exit 0
     }
 }
 [ $# -eq 2 -a "$1" == "--list-firmware" ] && { fw_show "$2" ; exit 0 ; }
@@ -708,7 +711,6 @@ done
 [ "$NOCHECK" != "" -a $REMOTE -eq 0 ] && error 21
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 0 ] && error 19
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 1 -a $ISZIP -eq 0 ] && error 18
-[ ! -d "$WORKDIR" -a $ERASE  -eq 0 ] && mkdir "$WORKDIR"
 [ $ONLY -eq 1 ] && { [ "$MODE" != "" -o $RESTORE -eq 1 -o $AUTOYES -eq 1 ] && error 2 ; }
 [ $ONLY -eq 1 -a $REMOTE -eq 0 ] && error 21
 [ "$MODE"   == "" ] && { [ $RESTORE -eq 1 ] && MODE="clean" || MODE="dirty"; }
@@ -726,8 +728,15 @@ done
     printf "Erase all data in NVRAM memory (thorough)? $MSG"
     read ANSWER ; echo
     [ "$ANSWER" != "yes" ] && error 15
-    { prepare_upgrade ; erase_nvram ; rboot ; } &
-    wait
+    trap_all
+    (
+        trap_all
+        exec > "${WORKDIR}/ftup.exec"
+        prepare_upgrade
+        erase_nvram
+        rboot
+    ) &
+    SUBPID=$!
 } || {
     [ $ONLY -eq 0 -a $JFFS -eq 1 ] && handle_jffs
     [ $GETFW -eq 1 -a "$GETFWARG" != "" ] && fw_get "$GETFWARG"
@@ -756,13 +765,28 @@ done
     }
     ilog 6 "Starting $MODE upgrade with firmware '$fwname'"
     # starting upgrade in background to prevent disconnection incidents
-    {
-    [ $RESTORE -eq 1 ] && restore
-    prepare_upgrade
-    upgrade
-    [ "$MODE" == "clean" ] && erase_nvram
+    trap_all
+    (
+        trap_all
+        exec > "${WORKDIR}/ftup.exec"
+        [ $RESTORE -eq 1 ] && restore
+        prepare_upgrade
+        upgrade && {
+            [ "$MODE" == "clean" ] && erase_nvram
+            rboot
+        }
+    ) &
+    SUBPID=$!
+}
+tail -F "${WORKDIR}/ftup.exec" &
+wait $SUBPID
+kill -9 $(jobs -p) &>/dev/null
+[ -s "${WORKDIR}/ftup.fail" ] && {
+    FAIL=1
+    trap ctrl_c SIGINT
+    echo -e "\nSomething went wrong. The router is NOT upgraded. The router will reboot.\n"
+    echo -e "To cancel the reboot and retry the upgrade manually press 'Ctrl+C'\n"
+    wait_loop 10 "Rebooting in"
     rboot
-    } &
-    wait
 }
 exit 0
