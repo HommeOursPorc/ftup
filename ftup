@@ -583,10 +583,7 @@ rboot() {
 [ $RESTORE -eq 1 -a ! -s "${WORKDIR}/ftup.fail" ] && ilog 6 "Your router will reboot twice to restore its settings. Please be patient."
 sync
 sleep 3
-/sbin/reboot && kill -9 $SSH &>/dev/null
-kill -9 $(jobs -p) &>/dev/null
-sleep 3
-exit 0
+/sbin/reboot
 }
 
 
@@ -779,8 +776,9 @@ done
     SUBPID=$!
 }
 tail -F "${WORKDIR}/ftup.exec" &
+TPID=$!
 wait $SUBPID
-kill -9 $(jobs -p) &>/dev/null
+kill -9 $TPID &>/dev/null
 [ -s "${WORKDIR}/ftup.fail" ] && {
     FAIL=1
     trap ctrl_c SIGINT
