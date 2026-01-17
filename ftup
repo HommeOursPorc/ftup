@@ -9,7 +9,7 @@ trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-ver="v0.52"
+ver="v0.52-test-002"
 last_up="(2026-01-16)"
 
 help() {
@@ -634,6 +634,7 @@ SDK=""
 SDKFULL=""
 VAR=""
 NVRAM=""
+grep -qi "wl_high" /www/admin-upgrade.asp && WLHIGH=1 || WLHIGH=0
 [ $(NG jffs2_on) -eq 1 ] && JFFS=1 || JFFS=0
 LIST=0
 SSH=$PPID
@@ -751,6 +752,8 @@ done
     printf "   $fwname\n\n"
     [ $JFFS -eq 1 ] && printf "Warning: JFFS content might be lost, make sure to have backups!\n\n"
     [ "$MODE" == "clean" ] && printf "Warning: Clean upgrade mode selected.\nALL settings will be ERASED!\nClean upgrade is implied with option '-r'.\n\n"
+    [ $WLHIGH -eq 1 ] && printf "WARNING! This router (with wl_high module) \nrequires Wi-Fi to be turned off for the upgrade  \nto work properly, so only update it \nusing a cable connection!\n\n"
+    printf "Warning: Do not interrupt the router!\n\n"
     printf "Proceed $MODE upgrade?\n"
     [ $AUTOYES -eq 1 ] && {
         printf "\n\nTo cancel press CTRL+C\n\n"
