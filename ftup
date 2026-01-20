@@ -565,7 +565,7 @@ sleep 3
 }
 
 rboot() {
-echo "Rebooting..."
+echo -e "Rebooting @ $(date '+%H:%M:%S (%Y-%m-%d)'), uptime = $(uptime | cut -d',' -f1  | awk '{print $3}')\nRebooting now..."
 sync
 sleep 3
 kill -9 $SSH &>/dev/null
