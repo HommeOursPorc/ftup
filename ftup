@@ -9,7 +9,7 @@ trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-ver="v0.52-test-002"
+ver="v0.52-test-003"
 last_up="(2026-01-16)"
 
 help() {
@@ -580,9 +580,11 @@ sleep 3
 }
 
 rboot() {
+echo "Rebooting..."
 [ $RESTORE -eq 1 -a ! -s "${WORKDIR}/ftup.fail" ] && ilog 6 "Your router will reboot twice to restore its settings. Please be patient."
 sync
 sleep 3
+kill -9 $SSH &>/dev/null
 /sbin/reboot
 }
 
