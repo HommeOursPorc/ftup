@@ -9,7 +9,7 @@ trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-ver="v0.52-test-003"
+ver="v0.52-test-004"
 last_up="(2026-01-16)"
 
 help() {
@@ -17,7 +17,7 @@ echo -e "FreshTomato Upgrade Script $ver $last_up
 
 Usage: ftup [options] [firmware path or URL]
 
-Default is dirty upgrade (NVRAM untouched) unless '-c' or '-r' is specified.
+Default is dirty upgrade (NVRAM untouched) unless '-c' is specified.
 
 Single option:
   --changelog      Print latest FreshTomato changelog.
@@ -45,9 +45,6 @@ Options:
   -n               Use wget '--no-check-certificate'
                    (you can try this if wget fail to download the firmware).
   -o               Only download firmware (no installation).
-  -r               Restore settings after upgrade (implies '-c'),
-                   PlainText Backup script by @rs232 is required
-                   which is available on the 'linksysinfo.org' forum.
   -y               Automatic 'YES' to prompts. USE WITH CAUTION!
   -z               Force zip download in tmpfs.
 
@@ -75,8 +72,8 @@ case $1 in
 1)  m="Unknown argument.";;
 2)  m="Too many arguments.";;
 3)  m="Firmware path or URL is missing.";;
-4)  m="No USB device found. Settings restoration is not possible.";;
-5)  m="nvram_backup is missing. Settings restoration is not possible.";;
+4)  m="";;
+5)  m="";;
 6)  m="Firmware format not supported.";;
 7)  m="Out of memory, not enough RAM.";;
 8)  m="Unable to download firmware.";;
@@ -85,7 +82,7 @@ case $1 in
 11) m="Can't unzip archive, it's either corrupted or not enough RAM.";;
 12) m="ZIP archive countain zero or more than one firmware.";;
 13) m="Upgrading firmware with JFFS enabled is not possible. Optionally you can enable 'Unmount JFFS during upgrade' in the webUI in 'Administration > Admin Access'";;
-14) m="Backup is missing. Settings restoration is not possible.";;
+14) m="";;
 15) e=5; m="Operation cancelled.";;
 16) m="Can't fetch newest version number from freshtomato.org.";;
 17) m="Destination directory doesn't exist.";;
@@ -475,13 +472,6 @@ nvsize="$(echo "$fwname" | grep -Eo "(|[1-9])[1-9][1-9]K")"
 }
 }
 
-restore() {
-printf "Creating backup..."
-$NVBACKUP usbrestore all
-[ -s "$AUTORUN" ] && printf " Done\n" || error 14
-ilog 5 "Backup created successfully: $AUTORUN"
-}
-
 handle_jffs() {
 pwd | grep -q "^/jffs" && error 24
 pwd -P | grep -q "^/jffs" && error 24
@@ -561,11 +551,6 @@ sleep 3
 [ ! -s "${WORKDIR}/ftup.out" ] && {
     ilog 3 "Writing of ${fwname} unsuccessful!!"
     echo 1 > ${WORKDIR}/ftup.fail
-    [ $RESTORE -eq 1 ] && {
-        NOMORE="restore.$(date '+%Y%m%d_%H%M%S')"
-        mv -f "$AUTORUN" "$(dirname "$AUTORUN")/$NOMORE"
-        ilog 6 "Auto settings restoration cancelled, restore.autorun was renamed $NOMORE"
-    }
     return 1
 }
 echo "mtd-write: $(cat ${WORKDIR}/ftup.out | sort -u)"
@@ -581,7 +566,6 @@ sleep 3
 
 rboot() {
 echo "Rebooting..."
-[ $RESTORE -eq 1 -a ! -s "${WORKDIR}/ftup.fail" ] && ilog 6 "Your router will reboot twice to restore its settings. Please be patient."
 sync
 sleep 3
 kill -9 $SSH &>/dev/null
@@ -610,7 +594,6 @@ NOCHECK=""
 ONLY=0
 ERASE=0
 AUTOYES=0
-RESTORE=0
 NVBACKUP=""
 AUTORUN=""
 FWPATH=""
@@ -677,7 +660,6 @@ for a in "$@"; do
                 g) [ $GETFW      -eq 0 ] && { GETFW=1 ; SETFW=1  ; }         || error 2 ;;
                 n) [ "$NOCHECK"  == "" ] && NOCHECK="--no-check-certificate" || error 2 ;;
                 o) [ $ONLY       -eq 0 ] && ONLY=1       || error 2 ;;
-                r) [ $RESTORE    -eq 0 ] && RESTORE=1    || error 2 ;;
                 y) [ $AUTOYES    -eq 0 ] && AUTOYES=1    || error 2 ;;
                 z) [ $FORCEZIP   -eq 0 ] && FORCEZIP=1   || error 2 ;;
                 *) error 1 ;;
@@ -711,15 +693,9 @@ done
 [ "$NOCHECK" != "" -a $REMOTE -eq 0 ] && error 21
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 0 ] && error 19
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 1 -a $ISZIP -eq 0 ] && error 18
-[ $ONLY -eq 1 ] && { [ "$MODE" != "" -o $RESTORE -eq 1 -o $AUTOYES -eq 1 ] && error 2 ; }
+[ $ONLY -eq 1 ] && { [ "$MODE" != "" -o $AUTOYES -eq 1 ] && error 2 ; }
 [ $ONLY -eq 1 -a $REMOTE -eq 0 ] && error 21
-[ "$MODE"   == "" ] && { [ $RESTORE -eq 1 ] && MODE="clean" || MODE="dirty"; }
-[ $RESTORE  -eq 1 ] && {
-    [ $(mount | grep -q /mnt ; echo $?) -ne 0 ] && error 4
-    NVBACKUP="$(which nvram_backup)"
-    [ "$NVBACKUP" == "" ] && { [ -s "/tmp/nvram_backup" ] && NVBACKUP="/tmp/nvram_backup" || error 5 ; }
-    AUTORUN="$(mount | grep /mnt | awk '{print $3}')/restore.autorun"
-}
+[ "$MODE"   == "" ] && MODE="dirty"
 
 
 # Main
@@ -771,7 +747,6 @@ done
     (
         trap_all
         exec > "${WORKDIR}/ftup.exec"
-        [ $RESTORE -eq 1 ] && restore
         prepare_upgrade
         upgrade && {
             [ "$MODE" == "clean" ] && erase_nvram
