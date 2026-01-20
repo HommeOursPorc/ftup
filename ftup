@@ -589,7 +589,7 @@ sleep 3
 
 # Global Variables
 WORKDIR="/tmp/ftupwd"
-[ ! -d "$WORKDIR" ] && mkdir "$WORKDIR" || find "${WORKDIR}/*" ! -name "." ! -name "*.trx" ! -name "*.zip" -exec rm -f {} \; &>/dev/null
+[ ! -d "$WORKDIR" ] && mkdir "$WORKDIR" || find "$WORKDIR" ! -name "." ! -name "*.trx" ! -name "*.zip" -exec rm -f {} \; &>/dev/null
 MSG="To continue type [yes], to cancel type [n]: "
 OPTIONS=""
 MODE=""
