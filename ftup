@@ -525,12 +525,18 @@ printf "Done\n"
 
 prepare_upgrade() {
 # Prepare firmware flashing
-sync
+sync ; sleep 2
 c=10; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "Please wait... $c\033[0K\r";sleep 1;done
 nvram set action_service="upgrade-start"
 sleep 2
 kill -s SIGUSR1 1
 c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "Stopping services... $c\033[0K\r";sleep 1;done; printf "Stopping services... Done\n"
+[ $ERASE -eq 0 ] && {
+    nvram set os_version_last="$CURVER"
+    nvram commit
+    rm -f /var/log/messages /var/log/messages.0
+    sync ; sleep 2
+}
 }
 
 upgrade() {
