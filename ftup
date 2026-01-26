@@ -2,8 +2,7 @@
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/home/root:
 USERAGENT="Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/109.0"
 alias yget="/usr/bin/wget -T 15 -U \"$USERAGENT\" --header \"Cache-Control: no-cache\""
-#. nvram_ops # for future use
-NG() { nvram get "$1" ; } # for backward compatibility
+. nvram_ops
 ctrl_c() { kill -9 $(jobs -p) &>/dev/null ; echo ; [ $FAIL -eq 0 ] && error 15 || exit 15 ; }
 trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
@@ -706,8 +705,9 @@ done
 
 # Main
 [ $ERASE -eq 1 ] && {
-    printf "\n\n                POINT OF NO RETURN\n\n"
-    printf "Erase all data in NVRAM memory (thorough)? $MSG"
+    printf "\n\n                ${f_light_red}POINT OF NO RETURN${reset}\n\n"
+    printf "${f_light_yellow}Warning:${reset} ALL settings will be ERASED!\n\n"
+    printf "Erase all data in NVRAM memory (thorough)?\n\n$MSG"
     read ANSWER ; echo
     [ "$ANSWER" != "yes" ] && error 15
     trap_all
@@ -726,18 +726,19 @@ done
     [ $REMOTE -eq 1 ] && download
     [ $ONLY -eq 1 ] && exit 0
     prep_file
-    printf "\n\n                POINT OF NO RETURN\n\n"
-    printf "Make sure you are using the right firmware before proceeding!\n\n"
-    printf "Current:\n"
+    printf "\n\n                ${f_light_red}POINT OF NO RETURN${reset}\n\n"
+    printf "${f_light_yellow}Make sure you are using the right firmware before proceeding!${reset}\n\n"
+    printf "${f_light_green}Current:${reset}\n"
     printf "   Router : $FULLMODEL\n"
     printf "   NVRAM  : $NVRAM\n"
     printf "   Version: $OSVER\n\n"
-    printf "Upgrade with:\n"
+    printf "${f_light_green}Upgrade with:${reset}\n"
     printf "   $fwname\n\n"
-    [ $JFFS -eq 1 ] && printf "Warning: JFFS content might be lost, make sure to have backups!\n\n"
-    [ "$MODE" == "clean" ] && printf "Warning: Clean upgrade mode selected.\nALL settings will be ERASED!\nClean upgrade is implied with option '-r'.\n\n"
-    [ $WLHIGH -eq 1 ] && printf "WARNING! This router (with wl_high module) \nrequires Wi-Fi to be turned off for the upgrade  \nto work properly, so only update it \nusing a cable connection!\n\n"
-    printf "Warning: Do not interrupt the router!\n\n"
+    [ $JFFS -eq 1 ] && printf "${f_light_yellow}Warning:${reset} JFFS content might be lost, make sure to have backups!\n\n"
+    [ "$MODE" == "clean" ] && printf "${f_light_yellow}Warning:${reset} Clean upgrade mode selected.\nALL settings will be ERASED!\n\n"
+    [ $WLHIGH -eq 1 ] && printf "${f_light_yellow}WARNING!${reset} This router (with wl_high module) \nrequires Wi-Fi to be turned off for the upgrade  \nto work properly, so only update it \nusing a cable connection!\n\n"
+    [ $(NG remote_upgrade) -eq 0 ] && printf "${f_light_yellow}Warning:${reset} Remote Upgrade is disabled. You will lost contact with \nthe router if you are upgrading from the WAN, \nbut the upgrade will continue in background.\n\n"
+    printf "${f_light_yellow}Warning:${reset} Do not interrupt the router!\n\n"
     printf "Proceed $MODE upgrade?\n"
     [ $AUTOYES -eq 1 ] && {
         printf "\n\nTo cancel press CTRL+C\n\n"
