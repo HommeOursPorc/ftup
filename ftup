@@ -571,7 +571,7 @@ sleep 3
 }
 
 rboot() {
-echo -e "Rebooting @ $(date '+%H:%M:%S (%Y-%m-%d)'), uptime = $(uptime | cut -d',' -f1  | awk '{print $3}')\nRebooting now..."
+echo -e "Rebooting @ $(date '+%H:%M:%S (%Y-%m-%d)'), uptime = $(uptime | awk '{$1=$1; print}' | sed 's/, load.*//;s/.*up //')\nRebooting now..."
 sync
 sleep 3
 kill -9 $SSH &>/dev/null
