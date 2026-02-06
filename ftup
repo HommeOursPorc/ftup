@@ -8,8 +8,8 @@ trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-ver="v0.52-test-004"
-last_up="(2026-01-16)"
+ver="v0.52-test-005"
+last_up="(2026-02-05)"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver $last_up
@@ -144,7 +144,8 @@ TMODEL="$(echo "$FULLMODEL" | awk '{if(NF>=3){{print $(NF-1)"_"$NF}}else{{print 
 FIX="$(NG t_fix1)"
 ID="$(NG odmpid)"
 [ "$FIX" == "$TMODEL" ] && MODEL="$FIX" || { [ "$ID" != "" ] && MODEL="$ID" || MODEL="$FIX" ; }
-[ "$MATCH" != "" ] && { [ "$MATCH" == "$MODEL" ] && ACCURACY=100 || MODEL="$MATCH" ; }
+[ "$MATCH" != "" ] && { [ "$MATCH" == "$MODEL" ] && ACCURACY=75 || MODEL="$MATCH" ; }
+[ "$FNAME" != "" ] && ACCURACY=100
 SDK="$(echo "$OSVER" | awk '{ for(i=1; i<=NF; i++) { if(match($i, /^K+/)) { print $i; break; } } }')" # eg K26ARM
 [ "$CPU" == "mips" ] && {
     MIPSREV="$(echo "$SDK" | cut -d "_" -f1 | sed "s/K26//i")"
@@ -175,10 +176,12 @@ FreshTomato $OSVER
       NVRAM = $NVRAM
       BUILD = $VAR
     VERSION = $CURVER
+$([ "$FNAME" != "" ] && printf "   FIRMWARE = $FNAME")
 
 Firmware Accuracy = $(
     case "$ACCURACY" in
-        100) echo "HIGH -- Matched online";;
+        100) echo "PERFECT -- Full match with included firmware filename";;
+         75) echo "HIGH -- Matched online";;
          50) echo "MEDIUM -- Partial match (for dev: id algo did not match)";;
          25) echo "LOW -- No online match (possible with MIPS devices)";;
           0) echo "POOR -- Best effort";;
@@ -612,6 +615,7 @@ TMPFS=0
 [ "$(uname -m)" == "mips" ] && CPU="mips" || CPU="arm"
 MIPSREV=""
 OSVER="$(NG os_version)"
+[ -d "/rom/filename" ] && FNAME="$(ls -1 /rom/filename 2>/dev/null | head -n1)" || FNAME=""
 CURVER="$(echo "$OSVER" | awk '{print $1}')" # eg 2023.3
 LATESTVER=""
 CANUP=0
