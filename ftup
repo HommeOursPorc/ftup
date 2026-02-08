@@ -91,7 +91,7 @@ case $1 in
 21) m="Firmware URL is missing.";;
 22) m="Firmware informations doesn't match the router informations. Make sure you are using the right firmware for your device or try to upgrade without option '-y'.";;
 23) m="Unable to fetch changelog data from GitHub.";;
-24) m="Cannot use JFFS partition for upgrades. JFFS cannot get unmounted while still working from the '/jffs' directory.";;
+24) m="JFFS cannot get unmounted while still using the '/jffs' directory. Copy the script and work in the '/tmp' directory.";;
 25) m="Invalid version number. Version must be e.g. 2025.2";;
 26) m="Invalid build type. Build must be e.g. Mini, Max, VPN, AIO, etc.";;
 27) m="Unable to fetch firmware list.";;
@@ -475,11 +475,6 @@ nvsize="$(echo "$fwname" | grep -Eo "(|[1-9])[1-9][1-9]K")"
 }
 
 handle_jffs() {
-pwd | grep -q "^/jffs" && error 24
-pwd -P | grep -q "^/jffs" && error 24
-dirname "$0" | grep -q "^/jffs" && error 24
-echo "$DLDIR" | grep -q "^/jffs" && error 24
-echo "$FWURL" | grep -q "^/jffs" && error 24
 echo "
 WARNING: JFFS is enabled.
          Make sure you have a backup of its content as
@@ -489,7 +484,7 @@ WARNING: JFFS is enabled.
     printf "         Auto unmount JFFS during upgrade is enabled.\n\n"
     printf "JFFS will be stopped and unmounted\n"
     printf "\nTo cancel press CTRL+C\n\n"
-    wait_loop 7 "Continuing in"
+    mount | grep -q "type jffs" && wait_loop 7 "Continuing in"
 } || {
     [ $AUTOYES -eq 1 ] && {
         error 13
@@ -500,27 +495,32 @@ WARNING: JFFS is enabled.
         [ "$ANSWER" != "yes" ] && error 15
     }
 }
+
+    # Function to kill process that are using JFFS
     kill_jffs() {
-        kill -9 $(ps | grep -v "jffs.*gcd" | grep -v "ftup" | grep "[/]jffs" | awk '{print $1}') &>/dev/null
+        [ $# -eq 1 ] && s="-9" || s=""
+        kill $s $(ps | grep -v "jffs.*gcd" | grep -v "ftup" | grep "[/]jffs" | awk '{print $1}') &>/dev/null
         which lsof &>/dev/null && {
-            kill -9 $(lsof | grep -v "ftup" | grep "/jffs" | awk '{print $1}') &>/dev/null
+            kill $s $(lsof | grep -v "ftup" | grep "/jffs" | awk '{print $1}') &>/dev/null
         }
     }
 printf "Stopping JFFS... "
+# quit if JFFS is already unmounted
 [ $(ps | grep -c "[j]ffs.*gcd") -eq 0 -a $(lsmod | grep -c "jffs") -eq 0 ] && { printf "Done\n" ; return 0 ; }
+# else stop JFFS
 sync && sleep 2
 kill_jffs
 service jffs stop &>/dev/null
-sleep 1
+sleep 2
 c=0
 while ps | grep -q "[j]ffs.*gcd"; do
     [ $c -eq 5 ] && { printf "Unable to unmount JFFS\n" ; error 13 ; }
-    kill_jffs
+    kill_jffs -9
     umount -fl /jffs &>/dev/null
     c=$(($c+1))
-    sleep 1
+    sleep 2
 done
-lsmod | grep -q jffs && modprobe -r jffs jffs2 &>/dev/null
+lsmod | grep -q jffs && { modprobe -r jffs jffs2 &>/dev/null ; sleep 2 ; }
 lsmod | grep -q jffs && { printf "Unable to unmount JFFS\n" ; error 13 ; }
 printf "Done\n"
 }
@@ -582,8 +582,9 @@ kill -9 $SSH &>/dev/null
 
 
 # Global Variables
+SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd -P)
 WORKDIR="/tmp/ftupwd"
-[ ! -d "$WORKDIR" ] && mkdir "$WORKDIR" || find "$WORKDIR" ! -name "." ! -name "*.trx" ! -name "*.zip" -exec rm -f {} \; &>/dev/null
+[ ! -d "$WORKDIR" ] && mkdir "$WORKDIR" || find "$WORKDIR" ! -name "." ! -name "*.trx" ! -name "*.bin" ! -name "*.chk" ! -name "*.zip" -exec rm -f {} \; &>/dev/null
 MSG="To continue type [yes], to cancel type [n]: "
 OPTIONS=""
 MODE=""
@@ -724,12 +725,17 @@ done
     ) &
     SUBPID=$!
 } || {
-    [ $ONLY -eq 0 -a $JFFS -eq 1 ] && handle_jffs
+    [ $ONLY -eq 0 -a $JFFS -eq 1 ] && {
+        pwd | grep -q "^/jffs" && error 24
+        pwd -P | grep -q "^/jffs" && error 24
+        echo "$SCRIPT_DIR" | grep -q "^/jffs" && error 24
+    }
     [ $GETFW -eq 1 -a "$GETFWARG" != "" ] && fw_get "$GETFWARG"
     [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$GETFWARG" == "" ] && fw_get ; }
     [ $REMOTE -eq 1 ] && download
     [ $ONLY -eq 1 ] && exit 0
     prep_file
+    [ $JFFS -eq 1 ] && handle_jffs
     printf "\n\n                ${f_light_red}POINT OF NO RETURN${reset}\n\n"
     printf "${f_light_yellow}Make sure you are using the right firmware before proceeding!${reset}\n\n"
     printf "${f_light_green}Current:${reset}\n"
