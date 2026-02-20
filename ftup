@@ -51,7 +51,6 @@ Infos:
  - Single option are meant to be run without any other arguments.
  - URL must begin with \"http(s)://\".
  - Supported format is zip, trx, bin and chk.
- - Experimental features can be inaccurate, use at your own risk.
 
 $WARN_COLOR
    This script comes with no guarantee.
@@ -115,7 +114,7 @@ case $1 in
     3) e="ERROR" ; color="${f_light_red}" ;;
 esac
 logger -p $1 -t $(basename "$0")[$$] "$2"
-[ $1 -le 4 ] && echo -e "\n${color}${e}:${reset} ${2}\n" || echo -e "$2\n"
+[ $1 -le 4 ] && echo -e "${color}${e}:${reset} ${2}" || echo -e "$2"
 }
 
 wait_loop() {
@@ -135,6 +134,7 @@ steps_set() {
 if [ $AUTOUP -eq 1 -o $GETFW -eq 1 ]; then
     # -a or -g
     TOTAL_STEPS=11
+    [ $GETFW -eq 1 ] && TOTAL_STEPS=$(($TOTAL_STEPS - 1))
     [ $ONLY -eq 1 ] && { TOTAL_STEPS=3 ; return 0 ; }
 elif [ $AUTOUP -eq 0 -a $GETFW -eq 0 -a $REMOTE -eq 1 ]; then
     # download from internet URL
@@ -149,9 +149,16 @@ fi
 }
 
 steps_print() {
-# $1 message to print
-STEP=$(($STEP + 1))
-printf "${b_green}${f_black}[${STEP}/${TOTAL_STEPS}]${reset} ${1}"
+# $1 = message to print
+# Or $1 = add , $2 = msg
+w=${#TOTAL_STEPS}
+[ $# -eq 2 ] && {
+    m="$2"
+    STEP=$(($STEP + 1))
+} || {
+    m="$1"
+}
+printf "${f_light_cyan}[${reset}%*d/%d${f_light_cyan}]${reset} %s" $w $STEP $TOTAL_STEPS "$m"
 }
 
 id() {
@@ -230,10 +237,10 @@ URL="https://freshtomato.org/downloads/freshtomato-${CPU}"
 NODE=""
 TMPLIST="${WORKDIR}/tmplist.txt"
 FWLIST="${WORKDIR}/fwlist.txt"
-steps_print "Identifying device... "
+steps_print add "Identifying device... "
 id
 printf "$DONE"
-steps_print "Search firmware... "
+steps_print add "Search firmware... "
 [ $ACCURACY -eq 0 ] && error 29
 [ $ACCURACY -eq 25 ] && [ "$CPU" == "arm" -o "$SDK" == "RTAC" ] && error 29
 [ $# -eq 1 ] && {
@@ -310,7 +317,7 @@ fw_get() {
 FWLIST="${WORKDIR}/fwlist.txt"
 [ $AUTOYES -eq 1 ] && { echo "Full auto upgrades are currently disabled until this feature is proven to be working perfectly." ; error 15 ; }
 [ $AUTOUP -eq 1 ] && {
-    steps_print "Checking for updates... "
+    steps_print add "Checking for updates... "
     check_update -q
     printf "$DONE"
     [ $CANUP -eq 0 ] && { printf "\nNo upgrade available.\n\n" ; exit 0 ; } || ARGS="$LATESTVER"
@@ -322,10 +329,10 @@ echo -e "
 $(router_info)
 $([ $CANUP -eq 1 ] && printf "%s" "\nNew version $LATESTVER is available.\n\n")
 ${f_light_green}Download this firmware:${reset}
-$(basename "$FWURL")
+  Filename: $(basename "$FWURL")
 
 ${f_light_green}From:${reset}
-$FWURL
+  $FWURL
 "
 #[ $AUTOYES -eq 1 ] && {
 #    printf "\n\nTo cancel press CTRL+C\n\n"
@@ -346,10 +353,10 @@ echo -e "
 $(router_info)
 $([ $CANUP -eq 1 ] && printf "%s" "\nNew version '$LATESTVER' is available.\n\n")
 ${f_light_green}Available firmware:${reset}
-$(for f in $(cat "$FWLIST"); do basename "$f"; done)
+$(for f in $(cat "$FWLIST"); do echo "  $(basename "$f")"; done)
 
 ${f_light_green}Firmware can be found here:${reset}
-$(dirname $(head -n1 "$FWLIST"))
+  $(dirname $(head -n1 "$FWLIST"))
 "
 }
 
@@ -395,7 +402,7 @@ extension="${filename##*.}"
 }
 
 download() {
-steps_print "Download firmware... " ; echo
+steps_print add "Download firmware... " ; echo
 [ "$CPU" == "mips" ] && QUIET="-q" || QUIET=""
 [ "$DLDIR" != "" ] && DESTDIR="$DLDIR" || DESTDIR="$WORKDIR"
 [ "$(df -P "$DESTDIR" | tail -n1 | awk '{print $1}')" == "tmpfs" ] && TMPFS=1
@@ -442,18 +449,18 @@ sleep 1
         echo "$SRCMD5SUM" > "${DESTDIR}/${filename}.md5"
         echo "Source   MD5 sum = $SRCMD5SUM"
         echo "Download MD5 sum = $DESTMD5SUM"
-        [ "$SRCMD5SUM" == "$DESTMD5SUM" ] && echo -e "${f_light_green}MD5 Match!${reset}\n" || ERROR=1
+        [ "$SRCMD5SUM" == "$DESTMD5SUM" ] && echo -e "${f_light_green}MD5 Match!${reset}" || ERROR=1
     } || {
         ERROR=1
     }
     [ $ERROR -eq 1 ] && { rm -f "$FWPATH" "${DESTDIR}/${filename}.md5" ; error 20 ; }
 }
-echo "saved: $FWPATH"
-[ $ONLY -eq 1 ] && printf "${f_light_green}Download completed.${reset}\n\n"
+echo -e "${f_light_green}Saved:${reset} ${FWPATH}"
+[ $ONLY -eq 1 ] && echo -e "${f_light_green}Download completed.${reset}"
 }
 
 prep_file() {
-steps_print "Prepare files... "
+steps_print add "Prepare files... "
 [ "$FWPATH" == "" ] && {
     FWPATH="$FWURL"
     [ "$(df -P "$FWPATH" | tail -n1 | awk '{print $1}')" == "tmpfs" ] && TMPFS=1
@@ -478,11 +485,15 @@ printf "$DONE"
 
 verify() {
 # check if right firmware if possible
-steps_print "Verifying files... "
-[ "$MODEL" == "" ] && id
+[ "$MODEL" == "" ] && {
+    steps_print add "Identifying device... "
+    id
+    printf "$DONE"
+}
 WARN=""
 WMSG="doesn't match the one stated in the firmware name"
 fwname="$(basename "$FWPATH")"
+steps_print add "Verifying files... "
 [ "$CPU" == "arm" -a "$MODEL" != "R1D" ] && {
     [ "$(tail -n1 "$FWPATH" | strings | tail -n1)" != "$MODEL" ] && WARN="$WARN_COLOR Model name $MODEL NOT found inside the firmware file footer.\n"
 }
@@ -512,7 +523,7 @@ printf "  Version : $OSVER\n"
 }
 
 handle_jffs() {
-steps_print "Stop JFFS... " ; echo
+steps_print add "Stop JFFS... " ; echo
 echo -e "
 ${WARN_COLOR} JFFS is enabled.
          Make sure you have a backup of its content as
@@ -566,13 +577,15 @@ printf "$DONE"
 
 prepare_upgrade() {
 # Prepare firmware flashing
-steps_print "Stop services... "
 sync ; sleep 2
-c=10; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "${b_green}${f_black}[${STEP}/${TOTAL_STEPS}]${reset} Please wait... ${f_blue}${c}${reset}\033[0K\r";sleep 1;done
+steps_print add "Stop services..."
+printf "\033[2K\r"
+c=10; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Please wait...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done
 nvram set action_service="upgrade-start"
 sleep 2
 kill -s SIGUSR1 1
-c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "${b_green}${f_black}[${STEP}/${TOTAL_STEPS}]${reset} Stop services... ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r${b_green}${f_black}[${STEP}/${TOTAL_STEPS}]${reset} Stop services... $DONE"
+printf "\033[2K\r"
+c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Stop services...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r$(steps_print "Stop services...") $DONE"
 [ $ERASE -eq 0 ] && {
     nvram set os_version_last="$CURVER"
     nvram commit
@@ -583,7 +596,6 @@ c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne
 
 upgrade() {
 # Write firmware file
-steps_print "Flash firmware... "
 [ -e "${WORKDIR}/ftup.out" ] && rm -f ${WORKDIR}/ftup.out
 [ "$CPU" == "arm" ] && {
     nohup mtd-write2 ${FWPATH} linux > ${WORKDIR}/ftup.out 2>/dev/null &
@@ -592,8 +604,11 @@ steps_print "Flash firmware... "
     nohup mtd-write -w -i ${FWPATH} -d linux > ${WORKDIR}/ftup.out 2>/dev/null &
     MTD="mtd-write"
 }
-c=0; until [ "$(pidof "$MTD")" ];do c=$((c+1)); [ $c -le 60 ] && { echo -ne "${b_green}${f_black}[${STEP}/${TOTAL_STEPS}]${reset} Please wait... ${f_blue}${c}${reset}\033[0K\r"; usleep 500000; } || break ; done
-c=0; while [ "$(pidof "$MTD")" ];do c=$((c+1)); echo -ne "${b_green}${f_black}[${STEP}/${TOTAL_STEPS}]${reset} Writing firmware... ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r${b_green}${f_black}[${STEP}/${TOTAL_STEPS}]${reset} Writing firmware... $DONE"
+steps_print add "Flash firmware..."
+printf "\033[2K\r"
+c=0; until [ "$(pidof "$MTD")" ];do c=$((c+1)); [ $c -le 60 ] && { echo -ne "$(steps_print "Please wait...") ${f_blue}${c}${reset}\033[0K\r"; usleep 500000; } || break ; done
+printf "\033[2K\r"
+c=0; while [ "$(pidof "$MTD")" ];do c=$((c+1)); echo -ne "$(steps_print "Writing firmware...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r$(steps_print "Writing firmware...") $DONE"
 sleep 3
 
 # Check if flash successful
@@ -608,14 +623,14 @@ return 0
 }
 
 erase_nvram() {
-steps_print "Erasing nvram... "
+steps_print add "Erasing nvram... "
 [ "$CPU" == "arm" ] && mtd-erase2 nvram || mtd-erase -d nvram
 printf "$DONE"
 sleep 3
 }
 
 rboot() {
-steps_print "Rebooting now... " ; echo
+steps_print add "Rebooting now... " ; echo
 echo -e "Rebooting @ $(date '+%H:%M:%S (%Y-%m-%d)'), uptime = $(uptime | awk '{$1=$1; print}' | sed 's/, load.*//;s/.*up //')"
 sync
 sleep 3
@@ -770,7 +785,7 @@ done
 # Main
 echo -e "Starting \033[1m${f_light_green}Fresh${f_light_red}Tomato${reset} Upgrade Script ${ver} ${last_up}"
 [ $ERASE -eq 1 ] && {
-    printf "\n\n                ${f_light_white}${b_light_red} POINT OF NO RETURN ${reset}\n\n"
+    printf "\n\n\033[1m${f_light_red}------------------ POINT OF NO RETURN ------------------${reset}\n\n"
     printf "$WARN_COLOR ALL settings will be ERASED!\n\n"
     printf "Erase all data in NVRAM memory (thorough)?\n\n$MSG"
     read ANSWER ; echo
@@ -798,11 +813,11 @@ echo -e "Starting \033[1m${f_light_green}Fresh${f_light_red}Tomato${reset} Upgra
     prep_file
     verify
     [ $JFFS -eq 1 ] && handle_jffs
-    printf "\n\n                ${f_light_white}${b_light_red} POINT OF NO RETURN ${reset}\n\n"
+    printf "\n\n\033[1m${f_light_red}------------------ POINT OF NO RETURN ------------------${reset}\n\n"
     printf "$WARN_COLOR Make sure you are using the right firmware before proceeding!\n\n"
     router_info
     printf "${f_light_green}Upgrade with:${reset}\n"
-    printf "  $fwname\n\n"
+    printf "  Filename: $fwname\n\n"
     [ $JFFS -eq 1 ] && printf "$WARN_COLOR JFFS content might be lost, make sure to have backups!\n\n"
     [ "$MODE" == "clean" ] && printf "$WARN_COLOR Clean upgrade mode selected.\nALL settings will be ERASED!\n\n"
     [ $WLHIGH -eq 1 ] && printf "$WARN_COLOR This router (with wl_high module) \nrequires Wi-Fi to be turned off for the upgrade  \nto work properly, so only update it \nusing a cable connection!\n\n"
