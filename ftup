@@ -121,13 +121,13 @@ wait_loop() {
 # $1 = wait time in seconds
 # $2 = msg to print
 c=$1
-echo -ne "\033[?25l"
+printf "\033[?25l"
 while [ $c -gt 0 ]; do
 echo -ne "${2} ${f_blue}${c}${reset} (press enter to skip)\033[0K\r"
 read -s -t 1 && break
 : $((c--))
 done
-echo -ne "\033[?25h${reset}"
+printf "\033[?25h"
 }
 
 steps_set() {
@@ -502,15 +502,15 @@ steps_print add "Verifying files... "
 nvsize="$(echo "$fwname" | grep -Eo "(|[1-9])[1-9][1-9]K")"
 [ "$nvsize" != "$NVRAM" ] && WARN="${WARN}${WARN_COLOR} NVRAM size (${NVRAM}) ${WMSG} (${nvsize}).\n"
 [ "$CPU" == "mips" -a $(echo "$fwname" | grep -ci "$MIPSREV") -ne 1 ] && WARN="${WARN}${WARN_COLOR} MIPS version (${MIPSREV}) ${WMSG}.\n"
-[ "$WARN" != "" ] && {
+[ "$WARN" == "" ] && {
+    printf "$DONE"
+} || {
     printf "\n$WARN"
     [ $AUTOYES -eq 1 ] && error 22
     ilog 4 "Some information doesn't match, make sure you are using the right firmware before proceeding!!"
     printf "\nContinue anyway? $MSG"
     read ANSWER ; echo
     [ "$ANSWER" != "yes" ] && error 15
-} || {
-    printf "$DONE"
 }
 }
 
@@ -579,13 +579,13 @@ prepare_upgrade() {
 # Prepare firmware flashing
 sync ; sleep 2
 steps_print add "Stop services..."
-printf "\033[2K\r"
+printf "\033[?25l\033[2K\r"
 c=10; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Please wait...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done
 nvram set action_service="upgrade-start"
 sleep 2
 kill -s SIGUSR1 1
 printf "\033[2K\r"
-c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Stop services...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r$(steps_print "Stop services...") $DONE"
+c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Stop services...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r$(steps_print "Stop services...") $DONE\033[?25h"
 [ $ERASE -eq 0 ] && {
     nvram set os_version_last="$CURVER"
     nvram commit
@@ -605,10 +605,10 @@ upgrade() {
     MTD="mtd-write"
 }
 steps_print add "Flash firmware..."
-printf "\033[2K\r"
+printf "\033[?25l\033[2K\r"
 c=0; until [ "$(pidof "$MTD")" ];do c=$((c+1)); [ $c -le 60 ] && { echo -ne "$(steps_print "Please wait...") ${f_blue}${c}${reset}\033[0K\r"; usleep 500000; } || break ; done
 printf "\033[2K\r"
-c=0; while [ "$(pidof "$MTD")" ];do c=$((c+1)); echo -ne "$(steps_print "Writing firmware...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r$(steps_print "Writing firmware...") $DONE"
+c=0; while [ "$(pidof "$MTD")" ];do c=$((c+1)); echo -ne "$(steps_print "Writing firmware...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r$(steps_print "Writing firmware... ")"
 sleep 3
 
 # Check if flash successful
@@ -617,6 +617,7 @@ sleep 3
     echo 1 > ${WORKDIR}/ftup.fail
     return 1
 }
+printf "$DONE\033[?25h"
 echo "mtd-write: $(cat ${WORKDIR}/ftup.out | sort -u)"
 ilog 6 "${f_light_green}Successfully flashed${reset} ${fwname}"
 return 0
@@ -630,7 +631,7 @@ sleep 3
 }
 
 rboot() {
-steps_print add "Rebooting now... " ; echo
+steps_print add "Rebooting now..." ; echo
 echo -e "Rebooting @ $(date '+%H:%M:%S (%Y-%m-%d)'), uptime = $(uptime | awk '{$1=$1; print}' | sed 's/, load.*//;s/.*up //')"
 sync
 sleep 3
