@@ -2,14 +2,15 @@
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/home/root:
 USERAGENT="Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/109.0"
 alias yget="/usr/bin/wget -T 15 -U \"$USERAGENT\" --header \"Cache-Control: no-cache\""
+alias drop_caches="echo 3 > /proc/sys/vm/drop_caches"
 . nvram_ops
 ctrl_c() { printf "\033[?25h${reset}" ; kill -9 $(jobs -p) &>/dev/null ; echo ; [ $FAIL -eq 0 ] && error 15 || exit 15 ; }
 trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-ver="v0.52-test-007"
-last_up="(2026-02-16)"
+ver="v0.52-test-008"
+last_up="(2026-02-21)"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver $last_up
@@ -162,6 +163,8 @@ printf "${f_light_cyan}[${reset}%*d/%d${f_light_cyan}]${reset} %s" $w $STEP $TOT
 }
 
 id() {
+[ $# -eq 1 ] && TOTAL_STEPS=1
+steps_print add "Identifying device... "
 MATCH=""
 TARGETS="${WORKDIR}/targets_${CPU}.csv"
 yget -q --no-check-certificate -O "$TARGETS" "https://github.com/HommeOursPorc/ftup/raw/refs/heads/main/targets_${CPU}.csv"
@@ -176,7 +179,6 @@ FIX="$(NG t_fix1)"
 ID="$(NG odmpid)"
 [ "$FIX" == "$TMODEL" ] && MODEL="$FIX" || { [ "$ID" != "" ] && MODEL="$ID" || MODEL="$FIX" ; }
 [ "$MATCH" != "" ] && { [ "$MATCH" == "$MODEL" ] && ACCURACY=75 || MODEL="$MATCH" ; }
-[ "$FNAME" != "" ] && ACCURACY=100
 SDK="$(echo "$OSVER" | awk '{ for(i=1; i<=NF; i++) { if(match($i, /^K+/)) { print $i; break; } } }')" # eg K26ARM
 [ "$CPU" == "mips" ] && {
     MIPSREV="$(echo "$SDK" | cut -d "_" -f1 | sed "s/K26//i")"
@@ -192,12 +194,37 @@ case "$SDK" in
     *   ) SDKFULL="$SDK";;
 esac
 VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
+[ "$FNAME" != "" ] && {
+    # Extract filename info
+    ACCURACY=100
+    FN_SDK=$(echo "$FNAME" | grep -Eo "K[0-9][^-]*")
+    echo "$FNAME" | grep -qo "freshtomato-$FN_SDK" && FN_MODEL="" || FN_MODEL=$(echo "$FNAME" | sed "s/freshtomato-//;s/-K.*//")
+    [ "$CPU" == "mips" ] && {
+        FN_MIPSREV="$(echo "$FN_SDK" | cut -d "_" -f1 | sed "s/K26//i")"
+        FN_SDK="$(echo "$FN_SDK" | cut -d "_" -f2)"
+    }
+    echo "$FNAME" | grep -qi usb && FN_USB=1 || FN_USB=0
+    FN_NVRAM="$(echo "$FNAME" | grep -Eo "[0-9]{2,3}K")"
+    FN_VERSION=$(echo "$FNAME" | grep -Eo "[0-9]{4}\.[0-9]{1,2}")
+    FN_VAR="$(echo "${FNAME%.*}" | sed "s/.*${CURVER}-//")"
+    
+    # verify
+    E=0
+    [ "$CPU" == "arm" -a "$MODEL" != "$FN_MODEL" ] && E=1
+    [ "$CPU" == "mips" -a "$FN_MODEL" != "" -a "$MODEL" != "$FN_MODEL" ] && E=1
+    [ "$CPU" == "mips" -a "$MIPSREV" != "$FN_MIPSREV" ] && E=1
+    [ "$SDK" != "$FN_SDK" -o "$NVRAM" != "$FN_NVRAM" -o "$CURVER" != "$FN_VERSION" -o "$VAR" != "$FN_VAR" ] && E=1
+    [ $E -eq 1 ] && {
+        echo -e "\n$WARN_COLOR Firmware filename in /rom/filename doesn't match router informations."
+        ACCURACY=50
+        return 1
+    }
+}
+printf "$DONE"
 }
 
 id_show() {
-printf "Identifying device..."
-id
-printf "\033[2K\r"
+id -1
 echo -e "
 ${f_blue}${FULLMODEL}${reset}
 FreshTomato $OSVER
@@ -237,9 +264,7 @@ URL="https://freshtomato.org/downloads/freshtomato-${CPU}"
 NODE=""
 TMPLIST="${WORKDIR}/tmplist.txt"
 FWLIST="${WORKDIR}/fwlist.txt"
-steps_print add "Identifying device... "
 id
-printf "$DONE"
 steps_print add "Search firmware... "
 [ $ACCURACY -eq 0 ] && error 29
 [ $ACCURACY -eq 25 ] && [ "$CPU" == "arm" -o "$SDK" == "RTAC" ] && error 29
@@ -371,7 +396,7 @@ rm -f ${WORKDIR}/ftup_cl.txt
 check_update() {
 # $1 == Quiet/Silent
 SILENT=0
-[ $# -eq 1 ] && { [ "$1" == "-q" ] && SILENT=1 ; }
+[ $# -eq 1 ] && SILENT=1
 LATESTVER="$(yget -q --no-check-certificate -O- "http://freshtomato.org/version.txt")"
 [ "$LATESTVER" == "" ] && error 16
 MAJ="${CURVER%.*}"
@@ -409,6 +434,7 @@ steps_print add "Download firmware... " ; echo
 yget -qS --spider $NOCHECK "$FWURL" 2>"${WORKDIR}/yget.out"
 [ $? -eq 0 -a $(grep -ci "content-length" "${WORKDIR}/yget.out") -gt 0 ] && FWSIZE=$((($(grep -i "content-length" "${WORKDIR}/yget.out" | awk 'NR==1 {max = $2} NR > 1 {if ($2 > max) max = $2} END {print max}')/1024)*3))
 rm -f "${WORKDIR}/yget.out"
+sync && drop_caches
 [ $ISZIP -eq 1 -a $TMPFS -eq 1 -a $FORCEZIP -eq 0 -a $FORCEFLY -eq 0 -a $FWSIZE -gt 0 ] && [ $(enough_memory $FWSIZE) -eq 1 ] && FORCEZIP=1
 {
 c=0; until [ "$(pidof wget)" ];do c=$((c+1)); [ $c -le 21 ] && usleep 500000 || break ; done ; c=0
@@ -480,16 +506,13 @@ steps_print add "Prepare files... "
     FWPATH="${WORKDIR}/$fwname"
     [ ! -s "$FWPATH" ] && error 9
 }
+FWSIZE=$(du "$FWPATH" | awk '{print $1}')
 printf "$DONE"
 }
 
 verify() {
 # check if right firmware if possible
-[ "$MODEL" == "" ] && {
-    steps_print add "Identifying device... "
-    id
-    printf "$DONE"
-}
+[ "$MODEL" == "" ] && id
 WARN=""
 WMSG="doesn't match the one stated in the firmware name"
 fwname="$(basename "$FWPATH")"
@@ -585,40 +608,72 @@ nvram set action_service="upgrade-start"
 sleep 2
 kill -s SIGUSR1 1
 printf "\033[2K\r"
-c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Stop services...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r$(steps_print "Stop services...") $DONE\033[?25h"
+c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Stop services...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done
+printf "\033[2K\r$(steps_print "Stop services... ")"
 [ $ERASE -eq 0 ] && {
     nvram set os_version_last="$CURVER"
     nvram commit
-    rm -f /var/log/messages /var/log/messages.0
-    sync ; sleep 2
 }
+rm -f /var/log/messages /var/log/messages.0
+sync && drop_caches
+TOTAL_RAM=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+[ "$TOTAL_RAM" -le 65536 ] && MIN_RAM=$(($FWSIZE + 3072)) || MIN_RAM=$(($TOTAL_RAM * 15/100))
+[ $(enough_memory $MIN_RAM) -eq 0 ] && {
+    printf "${f_light_red}FAIL${reset}\033[?25h\n"
+    echo -e "${f_light_red}ERROR:${reset} Not enough RAM."
+    echo "OOM" > "${WORKDIR}/ftup.fail"
+    return 1
+}
+printf "$DONE\033[?25h"
+return 0
 }
 
 upgrade() {
 # Write firmware file
-[ -e "${WORKDIR}/ftup.out" ] && rm -f ${WORKDIR}/ftup.out
-[ "$CPU" == "arm" ] && {
-    nohup mtd-write2 ${FWPATH} linux > ${WORKDIR}/ftup.out 2>/dev/null &
-    MTD="mtd-write2"
-} || {
-    nohup mtd-write -w -i ${FWPATH} -d linux > ${WORKDIR}/ftup.out 2>/dev/null &
-    MTD="mtd-write"
-}
 steps_print add "Flash firmware..."
+rm -f ${WORKDIR}/ftup.out ${WORKDIR}/ftup.fail
+[ "$CPU" == "arm" ] && {
+    MTD="mtd-write2"
+    (
+        trap_all
+        sleep 1
+        mtd-write2 ${FWPATH} linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
+    ) &
+    MTDPID=$!
+} || {
+    MTD="mtd-write"
+    (
+        trap_all
+        sleep 1
+        mtd-write -w -i ${FWPATH} -d linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
+    ) &
+    MTDPID=$!
+}
 printf "\033[?25l\033[2K\r"
-c=0; until [ "$(pidof "$MTD")" ];do c=$((c+1)); [ $c -le 60 ] && { echo -ne "$(steps_print "Please wait...") ${f_blue}${c}${reset}\033[0K\r"; usleep 500000; } || break ; done
+c=0; until kill -0 "$MTDPID" 2>/dev/null; do
+    c=$((c+1))
+    [ $c -gt 60 -o -s "${WORKDIR}/ftup.fail" ] && break
+    echo -ne "$(steps_print "Please wait...") ${f_blue}${c}${reset}\033[0K\r"
+    usleep 500000
+done
 printf "\033[2K\r"
-c=0; while [ "$(pidof "$MTD")" ];do c=$((c+1)); echo -ne "$(steps_print "Writing firmware...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done; printf "\033[2K\r$(steps_print "Writing firmware... ")"
-sleep 3
+c=0; while kill -0 "$MTDPID" 2>/dev/null; do
+    c=$((c+1))
+    echo -ne "$(steps_print "Writing firmware...") ${f_blue}${c}${reset}\033[0K\r"
+    sleep 1
+done
+printf "\033[2K\r$(steps_print "Writing firmware... ")"
+wait $MTDPID $(pidof "$MTD")
 
 # Check if flash successful
-[ ! -s "${WORKDIR}/ftup.out" ] && {
-    echo ; ilog 3 "Writing of ${fwname} unsuccessful!!"
-    echo 1 > ${WORKDIR}/ftup.fail
+[ -s "${WORKDIR}/ftup.fail" ] && {
+    printf "${f_light_red}FAIL${reset}\033[?25h\n"
+    ilog 3 "Writing of ${fwname} unsuccessful!!"
+    echo "mtd-write: $(cat ${WORKDIR}/ftup.fail)"
     return 1
 }
 printf "$DONE\033[?25h"
-echo "mtd-write: $(cat ${WORKDIR}/ftup.out | sort -u)"
+echo "mtd-write: $(cat ${WORKDIR}/ftup.out)"
 ilog 6 "${f_light_green}Successfully flashed${reset} ${fwname}"
 return 0
 }
@@ -631,7 +686,7 @@ sleep 3
 }
 
 rboot() {
-steps_print add "Rebooting now..." ; echo
+[ $FAIL -eq 0 ] && { steps_print add "Rebooting now..." ; echo ; } || echo "Rebooting now..."
 echo -e "Rebooting @ $(date '+%H:%M:%S (%Y-%m-%d)'), uptime = $(uptime | awk '{$1=$1; print}' | sed 's/, load.*//;s/.*up //')"
 sync
 sleep 3
@@ -839,8 +894,7 @@ echo -e "Starting \033[1m${f_light_green}Fresh${f_light_red}Tomato${reset} Upgra
     (
         trap_all
         exec &> "${WORKDIR}/ftup.exec"
-        prepare_upgrade
-        upgrade && {
+        prepare_upgrade && upgrade && {
             [ "$MODE" == "clean" ] && erase_nvram
             rboot
         }
@@ -850,13 +904,14 @@ echo -e "Starting \033[1m${f_light_green}Fresh${f_light_red}Tomato${reset} Upgra
 tail -F "${WORKDIR}/ftup.exec" &
 TPID=$!
 wait $SUBPID
+sleep 2
 kill -9 $TPID &>/dev/null
 [ -s "${WORKDIR}/ftup.fail" ] && {
     FAIL=1
     trap ctrl_c SIGINT
-    echo -e "\n${f_light_red}ERROR:${reset} Something went wrong. The router is NOT upgraded. The router will reboot.\n"
+    echo -e "${f_light_red}ERROR:${reset} Something went wrong. The router is NOT upgraded. The router will reboot.\n"
     echo -e "To cancel the reboot and retry the upgrade manually press 'Ctrl+C'\n"
-    wait_loop 10 "Rebooting in"
+    wait_loop 60 "Rebooting in"
     rboot
 }
 exit 0
