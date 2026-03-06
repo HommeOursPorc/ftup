@@ -339,7 +339,6 @@ fw_get() {
 # $1 == version/build
 [ $# -eq 1 ] && ARGS="$1" || ARGS=""
 FWLIST="${WORKDIR}/fwlist.txt"
-[ $AUTOYES -eq 1 ] && { echo "Full auto upgrades are currently disabled until this feature is proven to be working perfectly." ; error 15 ; }
 [ $AUTOUP -eq 1 ] && {
     steps_print add "Checking for updates... "
     check_update -q
@@ -358,14 +357,14 @@ ${f_light_green}Download this firmware:${reset}
 ${f_light_green}From:${reset}
   $FWURL
 "
-#[ $AUTOYES -eq 1 ] && {
-#    printf "\n\nTo cancel press CTRL+C\n\n"
-#    wait_loop 10 "Download starting in"
-#} || {
+[ $AUTOYES -eq 1 ] && {
+    printf "\nTo cancel press CTRL+C\n\n"
+    wait_loop 10 "Download starting in"
+} || {
     printf "$MSG"
     read ANSWER ; echo
     [ "$ANSWER" != "yes" ] && error 15
-#}
+}
 }
 
 fw_show() {
@@ -426,6 +425,7 @@ extension="${filename##*.}"
 }
 
 download() {
+printf "\033[2K\r"
 steps_print add "Download firmware... " ; echo
 [ "$CPU" == "mips" ] && QUIET="-q" || QUIET=""
 [ "$DLDIR" != "" ] && DESTDIR="$DLDIR" || DESTDIR="$WORKDIR"
@@ -810,7 +810,7 @@ done
 [ $SETDIR -eq 1 ] && error 17
 [ $AUTOUP -eq 1 -a $GETFW -eq 1 ] && error 2
 [ $AUTOUP -eq 1 -a $ONLY  -eq 1 ] && error 2
-#[ $AUTOUP -eq 1 ] && AUTOYES=1
+[ $AUTOUP -eq 1 ] && AUTOYES=1
 [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { [ "$FWURL" != "" ] && error 2 ; }
 [ $AUTOUP -eq 1 -o $GETFW -eq 1 ] && { REMOTE=1 ; OFFICIAL=1 ; ISZIP=1 ; }
 [ $AUTOUP -eq 0 -a $GETFW -eq 0 -a $ERASE -eq 0 -a "$FWURL" == "" ] && error 3
