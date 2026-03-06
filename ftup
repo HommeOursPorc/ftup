@@ -2,7 +2,6 @@
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/home/root:
 USERAGENT="Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/109.0"
 alias yget="/usr/bin/wget -T 15 -U \"$USERAGENT\" --header \"Cache-Control: no-cache\""
-alias drop_caches="echo 3 > /proc/sys/vm/drop_caches"
 . nvram_ops
 ctrl_c() { printf "\033[?25h${reset}" ; kill -9 $(jobs -p) &>/dev/null ; echo ; [ $FAIL -eq 0 ] && error 15 || exit 15 ; }
 trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
@@ -10,7 +9,7 @@ trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
 ver="v0.52-test-008"
-last_up="(2026-02-21)"
+last_up="(2026-03-05)"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver $last_up
@@ -124,7 +123,7 @@ wait_loop() {
 c=$1
 printf "\033[?25l"
 while [ $c -gt 0 ]; do
-echo -ne "${2} ${f_blue}${c}${reset} (press enter to skip)\033[0K\r"
+echo -ne "${2} ${c} (press enter to skip)\033[0K\r"
 read -s -t 1 && break
 : $((c--))
 done
@@ -226,7 +225,7 @@ printf "$DONE"
 id_show() {
 id -1
 echo -e "
-${f_blue}${FULLMODEL}${reset}
+$FULLMODEL
 FreshTomato $OSVER
 
   MAKE    : $MAKE
@@ -434,7 +433,6 @@ steps_print add "Download firmware... " ; echo
 yget -qS --spider $NOCHECK "$FWURL" 2>"${WORKDIR}/yget.out"
 [ $? -eq 0 -a $(grep -ci "content-length" "${WORKDIR}/yget.out") -gt 0 ] && FWSIZE=$((($(grep -i "content-length" "${WORKDIR}/yget.out" | awk 'NR==1 {max = $2} NR > 1 {if ($2 > max) max = $2} END {print max}')/1024)*3))
 rm -f "${WORKDIR}/yget.out"
-sync && drop_caches
 [ $ISZIP -eq 1 -a $TMPFS -eq 1 -a $FORCEZIP -eq 0 -a $FORCEFLY -eq 0 -a $FWSIZE -gt 0 ] && [ $(enough_memory $FWSIZE) -eq 1 ] && FORCEZIP=1
 {
 c=0; until [ "$(pidof wget)" ];do c=$((c+1)); [ $c -le 21 ] && usleep 500000 || break ; done ; c=0
@@ -446,7 +444,7 @@ done
 printf "\rDownloaded in  %02d:%02d:%02d\n" $((c/3600)) $(((c%3600)/60)) $((c%60))
 } &
 [ $ISZIP -eq 1 -a $TMPFS -eq 1 -a $FORCEZIP -eq 0 ] || [ $FORCEFLY -eq 1 ] && {
-    echo -e "Download mode: ${f_blue}SLOW${reset} -- unzip on the fly"
+    echo -e "Download mode: SLOW -- unzip on the fly"
     echo -e "$WARN_COLOR This mode is very SLOW! Please be patient."
     rm -f "${WORKDIR}/pipe1" "${WORKDIR}/pipe2" ; mkfifo "${WORKDIR}/pipe1" "${WORKDIR}/pipe2"
     md5sum "${WORKDIR}/pipe1" > "${WORKDIR}/${filename}.md5" &
@@ -459,7 +457,7 @@ printf "\rDownloaded in  %02d:%02d:%02d\n" $((c/3600)) $(((c%3600)/60)) $((c%60)
     rm -f "${WORKDIR}/pipe1"  "${WORKDIR}/pipe2" "${WORKDIR}/${filename}.md5" "${WORKDIR}/zip.list"
     FWPATH="${DESTDIR}/$fwname"
 } || {
-    echo -e "Download mode: ${f_blue}FAST${reset} -- direct download"
+    echo -e "Download mode: FAST -- direct download"
     FWPATH="${DESTDIR}/$filename"
     yget $QUIET $NOCHECK -O "$FWPATH" "$FWURL" || error 8
     [ $OFFICIAL -eq 1 -a -s "$FWPATH" ] && DESTMD5SUM="$(md5sum "$FWPATH" | awk '{print $1}')"
@@ -553,7 +551,7 @@ ${WARN_COLOR} JFFS is enabled.
          it is not guaranteed the content of JFFS
          will be preserved after a firmware upgrade."
 [ $(NG jffs2_auto_unmount) -eq 1 ] && {
-    printf "         ${f_blue}Auto unmount JFFS during upgrade is enabled.${reset}\n\n"
+    printf "         ${f_green}Auto unmount JFFS during upgrade is enabled.${reset}\n\n"
     printf "JFFS will be stopped and unmounted\n"
     printf "\nTo cancel press CTRL+C\n\n"
     wait_loop 7 "Continuing in"
@@ -600,29 +598,30 @@ printf "$DONE"
 
 prepare_upgrade() {
 # Prepare firmware flashing
-sync ; sleep 2
+sync ; sleep 1
 steps_print add "Stop services..."
 printf "\033[?25l\033[2K\r"
-c=10; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Please wait...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done
+c=10; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Please wait...") ${c}\033[0K\r";sleep 1;done
 nvram set action_service="upgrade-start"
-sleep 2
 kill -s SIGUSR1 1
 printf "\033[2K\r"
-c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Stop services...") ${f_blue}${c}${reset}\033[0K\r";sleep 1;done
+c=10; until [ $(nvram get g_upgrade) -eq 1 -a $c -gt 0 ]; do c=$((c-1));echo -ne "$(steps_print "Please wait...") ${c}\033[0K\r";sleep 1;done
+c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Stop services...") ${c}\033[0K\r";sleep 1;done
 printf "\033[2K\r$(steps_print "Stop services... ")"
 [ $ERASE -eq 0 ] && {
-    nvram set os_version_last="$CURVER"
-    nvram commit
-}
-rm -f /var/log/messages /var/log/messages.0
-sync && drop_caches
-TOTAL_RAM=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-[ "$TOTAL_RAM" -le 65536 ] && MIN_RAM=$(($FWSIZE + 3072)) || MIN_RAM=$(($TOTAL_RAM * 15/100))
-[ $(enough_memory $MIN_RAM) -eq 0 ] && {
-    printf "${f_light_red}FAIL${reset}\033[?25h\n"
-    echo -e "${f_light_red}ERROR:${reset} Not enough RAM."
-    echo "OOM" > "${WORKDIR}/ftup.fail"
-    return 1
+    rm -f /var/log/messages /var/log/messages.0
+    TOTAL_RAM=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+    [ "$TOTAL_RAM" -le 65536 ] && MIN_RAM=$(($FWSIZE + 3072)) || MIN_RAM=$(($TOTAL_RAM * 15/100))
+    [ $(enough_memory $MIN_RAM) -eq 0 ] && {
+        printf "${f_light_red}FAIL${reset}\033[?25h\n"
+        echo -e "${f_light_red}ERROR:${reset} Not enough RAM."
+        echo "OOM" > "${WORKDIR}/ftup.fail"
+        return 1
+    }
+    [ "$MODE" == "dirty" ] && {
+        nvram set os_version_last="$CURVER"
+        nvram commit
+    }
 }
 printf "$DONE\033[?25h"
 return 0
@@ -632,34 +631,25 @@ upgrade() {
 # Write firmware file
 steps_print add "Flash firmware..."
 rm -f ${WORKDIR}/ftup.out ${WORKDIR}/ftup.fail
-[ "$CPU" == "arm" ] && {
-    MTD="mtd-write2"
-    (
-        trap_all
-        sleep 1
-        mtd-write2 ${FWPATH} linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
-    ) &
-    MTDPID=$!
-} || {
-    MTD="mtd-write"
-    (
-        trap_all
-        sleep 1
-        mtd-write -w -i ${FWPATH} -d linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
-    ) &
-    MTDPID=$!
-}
+[ "$CPU" == "arm" ] && MTD="mtd-write2" || MTD="mtd-write"
+(
+    trap_all
+    sleep 1
+    [ "$CPU" == "arm" ] && mtd-write2 ${FWPATH} linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
+    [ "$CPU" != "arm" ] && mtd-write -w -i ${FWPATH} -d linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
+) &
+MTDPID=$!
 printf "\033[?25l\033[2K\r"
 c=0; until kill -0 "$MTDPID" 2>/dev/null; do
     c=$((c+1))
     [ $c -gt 60 -o -s "${WORKDIR}/ftup.fail" ] && break
-    echo -ne "$(steps_print "Please wait...") ${f_blue}${c}${reset}\033[0K\r"
+    echo -ne "$(steps_print "Please wait...") ${c}\033[0K\r"
     usleep 500000
 done
 printf "\033[2K\r"
 c=0; while kill -0 "$MTDPID" 2>/dev/null; do
     c=$((c+1))
-    echo -ne "$(steps_print "Writing firmware...") ${f_blue}${c}${reset}\033[0K\r"
+    echo -ne "$(steps_print "Writing firmware...") ${c}\033[0K\r"
     sleep 1
 done
 printf "\033[2K\r$(steps_print "Writing firmware... ")"
@@ -835,11 +825,11 @@ done
 [ $FORCEZIP -eq 1 -o $FORCEFLY -eq 1 ] && [ $REMOTE -eq 1 -a $ISZIP -eq 0 ] && error 18
 [ $ONLY -eq 1 ] && { [ "$MODE" != "" -o $AUTOYES -eq 1 ] && error 2 ; }
 [ $ONLY -eq 1 -a $REMOTE -eq 0 ] && error 21
-[ "$MODE"   == "" ] && MODE="dirty"
+[ $ERASE -eq 0 -a "$MODE" == "" ] && MODE="dirty"
 
 
 # Main
-echo -e "Starting \033[1m${f_light_green}Fresh${f_light_red}Tomato${reset} Upgrade Script ${ver} ${last_up}"
+echo -e "Starting FreshTomato Upgrade Script ${ver} ${last_up}"
 [ $ERASE -eq 1 ] && {
     printf "\n\n\033[1m${f_light_red}------------------ POINT OF NO RETURN ------------------${reset}\n\n"
     printf "$WARN_COLOR ALL settings will be ERASED!\n\n"
@@ -879,7 +869,7 @@ echo -e "Starting \033[1m${f_light_green}Fresh${f_light_red}Tomato${reset} Upgra
     [ $WLHIGH -eq 1 ] && printf "$WARN_COLOR This router (with wl_high module) \nrequires Wi-Fi to be turned off for the upgrade  \nto work properly, so only update it \nusing a cable connection!\n\n"
     [ $(NG remote_upgrade) -eq 0 ] && printf "$WARN_COLOR Remote Upgrade is disabled. You will lost contact with \nthe router if you are upgrading from the WAN, \nbut the upgrade will continue in background.\n\n"
     printf "$WARN_COLOR Do not interrupt the router!\n\n"
-    printf "Proceed ${f_blue}${MODE}${reset} upgrade?\n"
+    printf "Proceed ${MODE} upgrade?\n"
     [ $AUTOYES -eq 1 ] && {
         printf "\n\nTo cancel press CTRL+C\n\n"
         wait_loop 10 "Upgrade starting in"
@@ -888,7 +878,7 @@ echo -e "Starting \033[1m${f_light_green}Fresh${f_light_red}Tomato${reset} Upgra
         read ANSWER ; echo
         [ "$ANSWER" != "yes" ] && error 15
     }
-    ilog 6 "Starting ${f_blue}${MODE}${reset} upgrade with firmware ${f_blue}'${fwname}'${reset}"
+    ilog 6 "Starting ${MODE} upgrade with firmware '${fwname}'"
     # starting upgrade in background to prevent disconnection incidents
     trap_all
     (
