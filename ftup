@@ -8,8 +8,8 @@ trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-ver="v0.52-test-008"
-last_up="(2026-03-05)"
+ver="v0.52-test-009"
+last_up="(2026-04-27)"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver $last_up
@@ -195,7 +195,7 @@ esac
 VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
 [ "$FNAME" != "" ] && {
     # Extract filename info
-    ACCURACY=100
+    #ACCURACY=100
     FN_SDK=$(echo "$FNAME" | grep -Eo "K[0-9][^-]*")
     echo "$FNAME" | grep -qo "freshtomato-$FN_SDK" && FN_MODEL="" || FN_MODEL=$(echo "$FNAME" | sed "s/freshtomato-//;s/-K.*//")
     [ "$CPU" == "mips" ] && {
@@ -215,7 +215,7 @@ VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
     [ "$SDK" != "$FN_SDK" -o "$NVRAM" != "$FN_NVRAM" -o "$CURVER" != "$FN_VERSION" -o "$VAR" != "$FN_VAR" ] && E=1
     [ $E -eq 1 ] && {
         echo -e "\n$WARN_COLOR Firmware filename in /rom/filename doesn't match router informations."
-        ACCURACY=50
+        #ACCURACY=50
         return 1
     }
 }
@@ -605,7 +605,7 @@ c=10; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne
 nvram set action_service="upgrade-start"
 kill -s SIGUSR1 1
 printf "\033[2K\r"
-c=10; until [ $(nvram get g_upgrade) -eq 1 -a $c -gt 0 ]; do c=$((c-1));echo -ne "$(steps_print "Please wait...") ${c}\033[0K\r";sleep 1;done
+c=10; while [ $(nvram get g_upgrade) -eq 0 -a $c -gt 0 ]; do c=$((c-1));echo -ne "$(steps_print "Please wait...") ${c}\033[0K\r";sleep 1;done
 c=60; while [ "$(nvram get action_service)" -a $c -gt 0 ];do c=$((c-1));echo -ne "$(steps_print "Stop services...") ${c}\033[0K\r";sleep 1;done
 printf "\033[2K\r$(steps_print "Stop services... ")"
 [ $ERASE -eq 0 ] && {
@@ -635,8 +635,11 @@ rm -f ${WORKDIR}/ftup.out ${WORKDIR}/ftup.fail
 (
     trap_all
     sleep 1
-    [ "$CPU" == "arm" ] && mtd-write2 ${FWPATH} linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
-    [ "$CPU" != "arm" ] && mtd-write -w -i ${FWPATH} -d linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
+    if [ "$CPU" == "arm" ]; then
+        mtd-write2 ${FWPATH} linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
+    else
+        mtd-write -w -i ${FWPATH} -d linux 1>${WORKDIR}/ftup.out 2>${WORKDIR}/ftup.fail
+    fi
 ) &
 MTDPID=$!
 printf "\033[?25l\033[2K\r"
@@ -653,7 +656,7 @@ c=0; while kill -0 "$MTDPID" 2>/dev/null; do
     sleep 1
 done
 printf "\033[2K\r$(steps_print "Writing firmware... ")"
-wait $MTDPID $(pidof "$MTD")
+wait $MTDPID
 
 # Check if flash successful
 [ -s "${WORKDIR}/ftup.fail" ] && {
@@ -681,7 +684,7 @@ echo -e "Rebooting @ $(date '+%H:%M:%S (%Y-%m-%d)'), uptime = $(uptime | awk '{$
 sync
 sleep 3
 kill -9 $SSH &>/dev/null
-/sbin/reboot
+/sbin/reboot && exit 0
 }
 
 
@@ -837,14 +840,9 @@ echo -e "Starting FreshTomato Upgrade Script ${ver} ${last_up}"
     read ANSWER ; echo
     [ "$ANSWER" != "yes" ] && error 15
     trap_all
-    (
-        trap_all
-        exec &> "${WORKDIR}/ftup.exec"
-        prepare_upgrade
-        erase_nvram
-        rboot
-    ) &
-    SUBPID=$!
+    prepare_upgrade
+    erase_nvram
+    rboot
 } || {
     [ $ONLY -eq 0 -a $JFFS -eq 1 ] && {
         pwd | grep -q "^/jffs" && error 24
@@ -881,27 +879,18 @@ echo -e "Starting FreshTomato Upgrade Script ${ver} ${last_up}"
     ilog 6 "Starting ${MODE} upgrade with firmware '${fwname}'"
     # starting upgrade in background to prevent disconnection incidents
     trap_all
-    (
-        trap_all
-        exec &> "${WORKDIR}/ftup.exec"
-        prepare_upgrade && upgrade && {
-            [ "$MODE" == "clean" ] && erase_nvram
-            rboot
-        }
-    ) &
-    SUBPID=$!
+    prepare_upgrade && upgrade
+    if [ ! -s "${WORKDIR}/ftup.fail" ]; then
+        [ "$MODE" == "clean" ] && erase_nvram
+        rboot
+    else
+        FAIL=1
+        trap ctrl_c SIGINT
+        echo -e "${f_light_red}ERROR:${reset} Something went wrong. The router is NOT upgraded. The router will reboot.\n"
+        echo -e "To cancel the reboot and retry the upgrade manually press 'Ctrl+C'\n"
+        wait_loop 60 "Rebooting in"
+        rboot
+    fi
 }
-tail -F "${WORKDIR}/ftup.exec" &
-TPID=$!
-wait $SUBPID
-sleep 2
-kill -9 $TPID &>/dev/null
-[ -s "${WORKDIR}/ftup.fail" ] && {
-    FAIL=1
-    trap ctrl_c SIGINT
-    echo -e "${f_light_red}ERROR:${reset} Something went wrong. The router is NOT upgraded. The router will reboot.\n"
-    echo -e "To cancel the reboot and retry the upgrade manually press 'Ctrl+C'\n"
-    wait_loop 60 "Rebooting in"
-    rboot
-}
+
 exit 0
