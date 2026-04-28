@@ -8,8 +8,8 @@ trap_all() { trap '' SIGINT SIGTERM SIGHUP SIGPIPE SIGQUIT SIGSTOP SIGTSTP ; }
 trap ctrl_c SIGINT
 
 # FreshTomato Upgrade Script -- HommeOursPorc 2024/04
-ver="v0.52-test-009"
-last_up="(2026-04-27)"
+ver="v0.52"
+last_up="(2026-04-28)"
 
 help() {
 echo -e "FreshTomato Upgrade Script $ver $last_up
@@ -169,7 +169,7 @@ TARGETS="${WORKDIR}/targets_${CPU}.csv"
 yget -q --no-check-certificate -O "$TARGETS" "https://github.com/HommeOursPorc/ftup/raw/refs/heads/main/targets_${CPU}.csv"
 [ -s "$TARGETS" ] && {
     ACCURACY=25
-    [ $(grep -wc "$FULLMODEL" "$TARGETS") -eq 1 ] && { ACCURACY=50 ; MATCH="$(grep -w "$FULLMODEL" "$TARGETS" | awk -F',' '{print $1}')" ; }
+    [ $(grep -wc "$FULLMODEL" "$TARGETS") -eq 1 ] && { NAMED=1 ; ACCURACY=50 ; MATCH="$(grep -w "$FULLMODEL" "$TARGETS" | awk -F',' '{print $1}')" ; }
 }
 rm -f "$TARGETS"
 echo "$FULLMODEL" | grep -qi "Cisco Linksys" && MAKE="Cisco Linksys" || MAKE="$(echo "$FULLMODEL" | awk '{print $1}')"
@@ -195,9 +195,8 @@ esac
 VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
 [ "$FNAME" != "" ] && {
     # Extract filename info
-    #ACCURACY=100
     FN_SDK=$(echo "$FNAME" | grep -Eo "K[0-9][^-]*")
-    echo "$FNAME" | grep -qo "freshtomato-$FN_SDK" && FN_MODEL="" || FN_MODEL=$(echo "$FNAME" | sed "s/freshtomato-//;s/-K.*//")
+    echo "$FNAME" | grep -qo "freshtomato-$FN_SDK" && FN_MODEL="" || { FN_MODEL=$(echo "$FNAME" | sed "s/freshtomato-//;s/-K.*//") ; NAMED=1 ; }
     [ "$CPU" == "mips" ] && {
         FN_MIPSREV="$(echo "$FN_SDK" | cut -d "_" -f1 | sed "s/K26//i")"
         FN_SDK="$(echo "$FN_SDK" | cut -d "_" -f2)"
@@ -214,10 +213,11 @@ VAR="$(echo "$OSVER" | awk '{print $NF}')" # eg VPN-64K
     [ "$CPU" == "mips" -a "$MIPSREV" != "$FN_MIPSREV" ] && E=1
     [ "$SDK" != "$FN_SDK" -o "$NVRAM" != "$FN_NVRAM" -o "$CURVER" != "$FN_VERSION" -o "$VAR" != "$FN_VAR" ] && E=1
     [ $E -eq 1 ] && {
-        echo -e "\n$WARN_COLOR Firmware filename in /rom/filename doesn't match router informations."
-        #ACCURACY=50
+        echo -e "\n$WARN_COLOR Firmware filename in '/rom/filename' doesn't match router informations."
+        ACCURACY=0
         return 1
     }
+    [ $ACCURACY -eq 75 ] && ACCURACY=100
 }
 printf "$DONE"
 }
@@ -240,16 +240,16 @@ $([ "$FNAME" != "" ] && printf "  FIRMWARE: $FNAME")
 
 Firmware Accuracy: ${ACCURACY}% -- $(
     case "$ACCURACY" in
-        100) printf "PERFECT (Filename match)";;
-         75) printf "HIGH (Matched online)";;
-         50) printf "MEDIUM (Partial match)";;
-         25) printf "LOW (No match)";;
-          0) printf "POOR (Best effort)";;
+        100) printf "${f_light_green}PERFECT${reset} (Filename match)";;
+         75) printf "${f_light_green}HIGH${reset} (Matched online)";;
+         50) printf "${f_light_yellow}MEDIUM${reset} (Partial match)";;
+         25) printf "\033[0;38;5;208;49mLOW${reset} (No match)";;
+          0) printf "${f_light_red}POOR${reset} (Best effort)";;
     esac
 )
 
 Please report any incorrect results at:
-https://www.linksysinfo.org/index.php?threads/freshtomato-upgrade-script-v0-11.78326/
+https://github.com/HommeOursPorc/ftup/issues
 "
 }
 
@@ -302,12 +302,10 @@ yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NO
     yget -q --no-check-certificate -O- "$URL" | grep "data-sort=" | sed "s/.*\(\/$NODE\/\)//g;s/\".*//g" | tr -d "/" | grep "^freshtomato" | awk -v var="$URL" '{print var"/"$0}' >> "$TMPLIST"
 }
 [ ! -s "$TMPLIST" ] && error 27
-[ $ACCURACY -ge 50 ] && {
-    # Named
+[ $NAMED -eq 1 ] && {
     grep -qi "$MODEL.*$BUILD" "$TMPLIST" || error 28
     grep -wi "$MODEL.*$BUILD" "$TMPLIST" > "$FWLIST"
 } || {
-    # Unnamed
     PATTERN="freshtomato-K26"
     SPECIAL=0
     if [ "$MIPSREV" == "MIPSR1" -a $USB -eq 0 ]; then
@@ -518,7 +516,7 @@ steps_print add "Verifying files... "
 [ "$CPU" == "arm" -a "$MODEL" != "R1D" ] && {
     [ "$(tail -n1 "$FWPATH" | strings | tail -n1)" != "$MODEL" ] && WARN="$WARN_COLOR Model name $MODEL NOT found inside the firmware file footer.\n"
 }
-[ $ACCURACY -ge 50 ] && { [ $(echo "$fwname" | grep -ci "$MODEL") -ne 1 ] && WARN="${WARN}${WARN_COLOR} Router Model (${MODEL}) ${WMSG}.\n" ; }
+[ $NAMED -eq 1 ] && { [ $(echo "$fwname" | grep -ci "$MODEL") -ne 1 ] && WARN="${WARN}${WARN_COLOR} Router Model (${MODEL}) ${WMSG}.\n" ; }
 [ $(echo "$fwname" | grep -ci "$SDK") -ne 1 ] && WARN="${WARN}${WARN_COLOR} Router SDK (${SDK}) ${WMSG}.\n"
 nvsize="$(echo "$fwname" | grep -Eo "(|[1-9])[1-9][1-9]K")"
 [ "$nvsize" != "$NVRAM" ] && WARN="${WARN}${WARN_COLOR} NVRAM size (${NVRAM}) ${WMSG} (${nvsize}).\n"
@@ -691,15 +689,6 @@ kill -9 $SSH &>/dev/null
 # Global Variables
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd -P)
 WORKDIR="/tmp/ftupwd"
-[ -d "$WORKDIR" ] && { 
-    [ ! -e "${WORKDIR}/ftup.fail" ] && {
-        rm -f "${WORKDIR}/*"
-    } || {
-        find "$WORKDIR" ! -name "." ! -name "*.trx" ! -name "*.bin" ! -name "*.chk" ! -name "*.zip" -exec rm -f {} \; &>/dev/null
-    }
-} || {
-    mkdir "$WORKDIR"
-}
 MSG="To continue type [yes], to cancel type [n]: "
 DONE="${f_light_green}Done${reset}\n"
 WARN_COLOR="${f_light_yellow}WARNING:${reset}"
@@ -741,6 +730,7 @@ FULLMODEL="$(NG t_model_name)"
 MAKE=""
 MODEL=""
 ACCURACY=0
+NAMED=0
 echo "$OSVER" | grep -qi usb && USB=1 || USB=0
 SDK=""
 SDKFULL=""
@@ -753,6 +743,16 @@ SSH=$PPID
 STEP=0
 TOTAL_STEPS=2
 
+# Set Work Directory
+if [ -d "$WORKDIR" ]; then
+    if [ ! -e "${WORKDIR}/ftup.fail" ]; then
+        rm -f "${WORKDIR}/*"
+    else
+        find "$WORKDIR" ! -name "." ! -name "*.trx" ! -name "*.bin" ! -name "*.chk" ! -name "*.zip" -exec rm -f {} \; &>/dev/null
+    fi
+else
+    mkdir "$WORKDIR"
+fi
 
 # Check and set arguments
 [ $# -eq 0 ] && { help; exit 0; }
@@ -832,9 +832,10 @@ done
 
 
 # Main
+PONR="\n\n\033[1m${f_light_red}------------------ POINT OF NO RETURN ------------------${reset}\n\n"
 echo -e "Starting FreshTomato Upgrade Script ${ver} ${last_up}"
 [ $ERASE -eq 1 ] && {
-    printf "\n\n\033[1m${f_light_red}------------------ POINT OF NO RETURN ------------------${reset}\n\n"
+    printf "$PONR"
     printf "$WARN_COLOR ALL settings will be ERASED!\n\n"
     printf "Erase all data in NVRAM memory (thorough)?\n\n$MSG"
     read ANSWER ; echo
@@ -857,16 +858,15 @@ echo -e "Starting FreshTomato Upgrade Script ${ver} ${last_up}"
     prep_file
     verify
     [ $JFFS -eq 1 ] && handle_jffs
-    printf "\n\n\033[1m${f_light_red}------------------ POINT OF NO RETURN ------------------${reset}\n\n"
-    printf "$WARN_COLOR Make sure you are using the right firmware before proceeding!\n\n"
+    printf "$PONR"
     router_info
     printf "${f_light_green}Upgrade with:${reset}\n"
     printf "  Filename: $fwname\n\n"
+    printf "$WARN_COLOR Make sure you are using the right firmware before proceeding!\n\n"
     [ $JFFS -eq 1 ] && printf "$WARN_COLOR JFFS content might be lost, make sure to have backups!\n\n"
     [ "$MODE" == "clean" ] && printf "$WARN_COLOR Clean upgrade mode selected.\nALL settings will be ERASED!\n\n"
     [ $WLHIGH -eq 1 ] && printf "$WARN_COLOR This router (with wl_high module) \nrequires Wi-Fi to be turned off for the upgrade  \nto work properly, so only update it \nusing a cable connection!\n\n"
     [ $(NG remote_upgrade) -eq 0 ] && printf "$WARN_COLOR Remote Upgrade is disabled. You will lost contact with \nthe router if you are upgrading from the WAN, \nbut the upgrade will continue in background.\n\n"
-    printf "$WARN_COLOR Do not interrupt the router!\n\n"
     printf "Proceed ${MODE} upgrade?\n"
     [ $AUTOYES -eq 1 ] && {
         printf "\n\nTo cancel press CTRL+C\n\n"
@@ -876,6 +876,7 @@ echo -e "Starting FreshTomato Upgrade Script ${ver} ${last_up}"
         read ANSWER ; echo
         [ "$ANSWER" != "yes" ] && error 15
     }
+    printf "$WARN_COLOR Do not interrupt the router!\n\n"
     ilog 6 "Starting ${MODE} upgrade with firmware '${fwname}'"
     # starting upgrade in background to prevent disconnection incidents
     trap_all
