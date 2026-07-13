@@ -1,5 +1,5 @@
-List of routers confirmed to be compatible
-with the script identification function.
+**List of routers confirmed to be compatible
+with the script identification function:**
 
 - [ ] ASUS DSL‑AC68U
 - [ ] ASUS RT‑AC1750
